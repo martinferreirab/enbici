@@ -1,0 +1,25 @@
+[project]
+name = "enbici"
+version = "0.1.0"
+description = "Motor de ruteo para bicicletas en Montevideo con ponderación por elevación"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.140.13",
+    "folium>=0.20.0",
+    "geopy>=2.5.0",
+    "networkx>=3.6.1",
+    "osmnx>=2.1.1",
+    "pandas>=3.0.5",
+    "pydantic>=2.13.4",
+    "requests>=2.34.2",
+    "scikit-learn>=1.9.0",
+    "uvicorn>=0.51.0",
+]
+
+[tool.uv]
+package = false
+
+[build-system]
+requires = ["uv_build>=0.12.0,<0.13.0"]
+build-backend = "uv_build"
