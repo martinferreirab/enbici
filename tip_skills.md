@@ -19,3 +19,9 @@
 ## 4. API & Map Export Pattern
 - Return clean GeoJSON for route endpoints in FastAPI.
 - Keep Folium map generation modular in `/src/visualization.py`. Export maps to temporary or static HTML files for easy previewing.
+
+ ## 5. Reglas UI (Streamlit MVP)
+- **Diseño limpio y nativo**: Usar únicamente componentes estándar de Streamlit (`st.sidebar`, `st.slider`, `st.columns`, `st.metric`). Cero CSS/HTML personalizado o JS complejo.
+- **Visualización de Mapa**: Integrar `folium` con `streamlit-folium` (vía `st_folium`) para renderizar el mapa interactivo directamente en el layout principal.
+- **UX Directa**: Panel lateral en `st.sidebar` para inputs de origen/destino (coordenadas o presets rápidos de Montevideo) y sliders de ponderación. Área principal limpia mostrando métricas clave (`st.metric`) arriba del mapa.
+- **Eficiencia de código**: Escribir la UI en un solo archivo accesible (`app_ui.py` o `src/ui/app_streamlit.py`) reutilizando los módulos existentes sin duplicar lógica de ruteo.

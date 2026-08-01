@@ -1,7 +1,7 @@
 # enbici — Journey Log
 
 > Archivo de memoria del proyecto. Actualizar al final de cada sesión de trabajo.
-> Última actualización: **2026-07-29** (Fase 2 completada)
+> Última actualización: **2026-08-01** (Fase 5 completada)
 
 ---
 
@@ -21,8 +21,9 @@ Documentos de referencia del proyecto:
 |------|--------|-------------|
 | **Fase 1** — MVP Motor de Grafos y Elevación | ✅ Completada | Grafo cacheado, elevación, ruteo Dijkstra, mapa HTML |
 | **Fase 2** — API REST (FastAPI) | ✅ Completada | Endpoint `GET /route`, schemas Pydantic, lifespan context, static files |
-| Fase 3 — Ponderación climática (Open-Meteo) | ⬜ Pendiente | `wind_weight` |
-| Fase 4 — UI Streamlit | ⬜ Pendiente | Ajuste interactivo de parámetros |
+| **Fase 3** — Ponderación climática (Open-Meteo) | ✅ Completada | API Open-Meteo, `wind_weight`, métricas de viento en respuesta |
+| **Fase 4** — UI Streamlit | ✅ Completada | Sliders interactivos, presets, mapa Folium en vivo, métricas dinámicas |
+| **Fase 5** — Infraestructura Ciclista (Ciclovías) | ✅ Completada | Detección OSM ciclovías, `bikeway_weight` descuento, % en ruta |
 
 ---
 
@@ -90,23 +91,44 @@ uv run python run_server.py
 **Puntos de acceso:**
 - **Interactive API docs**: http://127.0.0.1:8000/docs (Swagger UI)
 - **Health check**: `GET /health`
-- **Route endpoint**: `GET /route?origin_lat=-34.9060&origin_lon=-56.1996&dest_lat=-34.8947&dest_lon=-56.1520&elevation_weight=5.0`
+- **Route endpoint**: `GET /route?origin_lat=-34.9060&origin_lon=-56.1996&dest_lat=-34.8947&dest_lon=-56.1520&elevation_weight=5.0&wind_weight=3.0`
 - **Generated map**: http://127.0.0.1:8000/static/ruta_montevideo.html
 
 **Ejemplos de uso:**
 
-Ruta de prueba (Plaza Independencia → Facultad de Ingeniería):
+Ruta sin viento (classic):
 ```bash
 curl "http://127.0.0.1:8000/route?origin_lat=-34.9060&origin_lon=-56.1996&dest_lat=-34.8947&dest_lon=-56.1520&elevation_weight=5.0"
 ```
 
-Respuesta esperada:
+Ruta con penalización por viento:
+```bash
+curl "http://127.0.0.1:8000/route?origin_lat=-34.9060&origin_lon=-56.1996&dest_lat=-34.8947&dest_lon=-56.1520&elevation_weight=5.0&wind_weight=3.0"
+```
+
+Respuesta esperada (sin viento):
 ```json
 {
   "distance_km": 5.11,
   "elevation_gain_m": 84.0,
   "node_count": 59,
-  "map_url": "/static/ruta_montevideo.html"
+  "map_url": "/static/ruta_montevideo.html",
+  "wind_metrics": null
+}
+```
+
+Respuesta esperada (con viento):
+```json
+{
+  "distance_km": 5.11,
+  "elevation_gain_m": 84.0,
+  "node_count": 59,
+  "map_url": "/static/ruta_montevideo.html",
+  "wind_metrics": {
+    "wind_speed_ms": 28.3,
+    "wind_direction_deg": 344.0,
+    "average_headwind_factor": 0.506
+  }
 }
 ```
 
@@ -167,19 +189,28 @@ El grafo se carga una única vez cuando el servidor inicia (en el contexto `life
 ### Función de costo
 
 ```
-weight = length * (1 + elevation_weight * max(0, grade))
+weight = length * (1 + elevation_weight * max(0, grade)) * wind_penalty
+wind_penalty = 1.0 + (wind_weight / 10) * wind_speed * headwind_factor
 ```
 
 - Implementada en `src/routing/cost.py → edge_cost()`
 - Solo penaliza pendientes **ascendentes** (`max(0, grade)`)
 - `grade` positivo acotado al 25 % para evitar artefactos de datos ruidosos
+- `wind_penalty`: multiplica el costo según el ángulo viento → rumbo de arista
+  - Headwind (0-90°): penaliza aumentando el costo
+  - Tailwind (180-270°): reduce el costo
+  - Factor de viento: `headwind_factor = (1 + cos(ángulo)) / 2` (rango 0-1)
 - Algoritmo: Dijkstra vía `networkx.shortest_path` con función de peso dinámica
+- Bearing de arista: calculado dinámicamente desde coordenadas de nodos con `_calculate_bearing(lat1, lon1, lat2, lon2)`
 
 ### Métricas de ruta (`RouteMetrics`)
 
 - `total_distance_m`: suma de `length` de aristas
 - `total_elevation_gain_m`: suma de `max(0, elev_v - elev_u)` por arista
 - `node_count`: cantidad de nodos en el path
+- `wind_weight`: factor de ponderación de viento (0-10)
+- `average_wind_speed_ms`: velocidad promedio de viento en la ruta (m/s)
+- `average_headwind_factor`: factor promedio de viento de frente (0=tailwind, 1=headwind)
 
 ### Visualización
 
@@ -219,14 +250,22 @@ weight = length * (1 + elevation_weight * max(0, grade))
 ```python
 from src.graph.loader import load_montevideo_graph
 from src.routing.pathfinder import find_route, nearest_node, compute_route_metrics, RouteMetrics
-from src.routing.cost import edge_cost
+from src.routing.cost import edge_cost, _calculate_wind_penalty
+from src.api.weather import fetch_wind_data, WindData
 from src.visualization.map_export import export_route_map
 
+# Sin viento
 G = load_montevideo_graph()
 origin = nearest_node(G, lat, lon)
 dest = nearest_node(G, lat, lon)
 path = find_route(G, origin, dest, elevation_weight=5.0)
 metrics = compute_route_metrics(G, path, elevation_weight=5.0)
+export_route_map(G, path, (lat_o, lon_o), (lat_d, lon_d), metrics, "output/mapa.html")
+
+# Con viento
+wind_data = fetch_wind_data()
+path = find_route(G, origin, dest, elevation_weight=5.0, wind_data=wind_data, wind_weight=3.0)
+metrics = compute_route_metrics(G, path, elevation_weight=5.0, wind_data=wind_data, wind_weight=3.0)
 export_route_map(G, path, (lat_o, lon_o), (lat_d, lon_d), metrics, "output/mapa.html")
 ```
 
@@ -279,6 +318,186 @@ curl "http://127.0.0.1:8000/route?origin_lat=-34.9060&origin_lon=-56.1996&dest_l
 open http://127.0.0.1:8000/docs
 ```
 
+### Fase 4 — Ejecutar Streamlit UI
+
+```bash
+# Lanzar la interfaz interactiva
+uv run streamlit run app_streamlit.py
+```
+
+Abrirá un navegador en `http://localhost:8501` con:
+- **Sidebar**: inputs para coordenadas, presets de ubicaciones, sliders de pesos
+- **Mapa interactivo**: visualización Folium en tiempo real
+- **Métricas**: distancia, desnivel, nodos, viento actual
+
+---
+
+## Resumen de Fase 3 (2026-08-01)
+
+**Implementación completada:**
+
+1. **Cliente Open-Meteo API** (`src/api/weather.py`):
+   - ✅ Función `fetch_wind_data()`: obtiene velocidad y dirección de viento actual para Montevideo
+   - ✅ Estructura `WindData`: encapsula speed_ms y direction_degrees
+   - ✅ Manejo graceful de fallos (retorna None si API falla)
+
+2. **Extensión de función de costo** (`src/routing/cost.py`):
+   - ✅ Función `_calculate_bearing()`: calcula rumbo geodésico (0-360°) entre dos puntos
+   - ✅ Función `_calculate_wind_penalty()`: calcula multiplicador de costo basado en ángulo viento→arista
+   - ✅ Actualización `edge_cost()`: acepta wind_data y wind_weight opcionales, mantiene compatible hacia atrás
+   - ✅ Dataclass `WindCostFactor`: estructura para métricas agregadas de viento
+
+3. **Ruteo con viento** (`src/routing/pathfinder.py`):
+   - ✅ `RouteMetrics`: agregar campos wind_weight, average_wind_speed_ms, average_headwind_factor
+   - ✅ `find_route()`: acepta wind_data/wind_weight opcionales, calcula bearing dinámicamente
+   - ✅ `compute_route_metrics()`: calcula headwind_factor promedio de la ruta
+
+4. **API REST actualizado** (`src/api/app.py`, `src/api/schemas.py`):
+   - ✅ Nuevo query parameter: `wind_weight` (0-10, default 0.0, deshabilitado si =0)
+   - ✅ Schema `WindMetrics`: wind_speed_ms, wind_direction_deg, average_headwind_factor
+   - ✅ `RouteResponse`: agregar campo `wind_metrics` (null si wind_weight=0)
+   - ✅ Endpoint `/route`: fetch wind data si wind_weight > 0, integra en routeo
+
+5. **Validación**:
+   - ✅ `main.py` sigue funcionando (compatible hacia atrás)
+   - ✅ API REST responde correctamente sin/con parámetro wind_weight
+   - ✅ Swagger UI en `/docs` documenta nuevos parámetros
+
+**Cambios de API:**
+```bash
+# Sin viento (original)
+GET /route?origin_lat=...&dest_lat=...&elevation_weight=5.0
+→ wind_metrics: null
+
+# Con viento (nuevo)
+GET /route?origin_lat=...&dest_lat=...&elevation_weight=5.0&wind_weight=3.0
+→ wind_metrics: { wind_speed_ms, wind_direction_deg, average_headwind_factor }
+```
+
+**Fórmula de costo con viento:**
+```
+cost = length * (1 + elevation_weight * grade) * (1 + wind_weight/10 * speed * headwind)
+```
+donde `headwind = (1 + cos(angle_viento_rumbo)) / 2` (rango 0-1)
+
+---
+
+## Resumen de Fase 4 (2026-08-01)
+
+**Implementación completada:**
+
+1. **Aplicación Streamlit** (`app_streamlit.py`):
+   - ✅ Interfaz limpia y responsiva con `st.set_page_config(layout="wide")`
+   - ✅ Sidebar con inputs y controles
+
+2. **Panel Lateral (Sidebar)**:
+   - ✅ Botones presets: 3 combinaciones predefinidas de ubicaciones Montevideo
+     - Plaza Independencia ↔ Facultad de Ingeniería
+     - Pocitos ↔ Cerro de Montevideo
+     - Puerto Viejo ↔ Pocitos
+   - ✅ Inputs manuales: lat/lon origen y destino con 4 decimales de precisión
+   - ✅ Sliders interactivos: `elevation_weight` (0-10, step 0.5) y `wind_weight` (0-10, step 0.5)
+   - ✅ Botón "Calcular Ruta" con tipo primary para destacar
+
+3. **Vista Principal**:
+   - ✅ Métricas en tarjetas (`st.metric`): Distancia, Desnivel, Nodos, Viento actual
+   - ✅ Información de viento: dirección en grados y cardinal (N/NE/E/etc)
+   - ✅ Factor de viento de frente: porcentaje + clasificación (Tailwind/Mixed/Headwind)
+   - ✅ Mapa interactivo Folium (`streamlit-folium`):
+     - Polyline azul con la ruta calculada
+     - Marcador verde (origen con icono play)
+     - Marcador rojo (destino con icono stop)
+     - Centro del mapa en punto medio de la ruta
+     - Zoom nivel 13 para vista de vecindario
+   - ✅ Exportación de HTML: guardar mapa detallado en `output/ruta_streamlit.html`
+
+4. **Integración con Motor**:
+   - ✅ `@st.cache_resource`: carga el grafo UNA SOLA VEZ en memoria
+   - ✅ Usa módulos core: `load_montevideo_graph`, `find_route`, `nearest_node`, `compute_route_metrics`
+   - ✅ Integración Open-Meteo: `fetch_wind_data()` cuando `wind_weight > 0`
+   - ✅ Manejo de errores graceful: validaciones y mensajes al usuario
+
+5. **UX & Accesibilidad**:
+   - ✅ Mensaje informativo inicial con instrucciones
+   - ✅ Estados de progreso: spinner durante cálculo, indicadores de éxito/error
+   - ✅ Responsivo en escritorio (4 columnas de métricas)
+   - ✅ Tooltips explicativos en sliders
+
+**Ubicaciones Predefinidas:**
+| Ubicación | Lat | Lon |
+|-----------|-----|-----|
+| Plaza Independencia | -34.9060 | -56.1996 |
+| Facultad de Ingeniería | -34.8947 | -56.1520 |
+| Pocitos | -34.8879 | -56.1747 |
+| Cerro de Montevideo | -34.8555 | -56.2007 |
+| Puerto Viejo | -34.9118 | -56.2147 |
+
+**Dependencias agregadas:**
+- `streamlit==1.60.0`
+- `streamlit-folium==1.0.0`
+
+**Cómo probar:**
+```bash
+# Lanzar Streamlit UI
+uv run streamlit run app_streamlit.py
+
+# Abrirá navegador en http://localhost:8501
+# - Seleccionar preset O ingresar coordenadas
+# - Ajustar sliders de elevación/viento
+# - Hacer clic en "Calcular Ruta"
+```
+
+---
+
+## Resumen de Fase 5 (2026-08-01)
+
+**Integración de Infraestructura Ciclista**
+
+**Implementación completada:**
+
+1. **Detección de Ciclovías** (`src/graph/loader.py`):
+   - ✅ Configuración `ox.settings.useful_tags_way` para incluir tags OSM de ciclovías
+   - ✅ Función `_mark_bikeways()`: marca aristas como `is_dedicated_bikeway: bool`
+   - ✅ Detecta tags: `highway=cycleway`, `cycleway`, `cycleway:left/right/both`, `bicycle=designated`
+   - ✅ Control `_graph_has_bikeways()` para re-marcar si falta del caché
+
+2. **Función de Costo Actualizada** (`src/routing/cost.py`):
+   - ✅ Parámetro `is_bikeway: bool` en `edge_cost()`
+   - ✅ Parámetro `bikeway_weight` (0-10, descuento en ciclovías)
+   - ✅ Fórmula: `cost = length * (1 + elevation) * (1 - bikeway_discount) * wind_penalty`
+   - ✅ Descuento máximo 50% en ciclovías dedicadas
+
+3. **Ruteo con Preferencia de Ciclovías** (`src/routing/pathfinder.py`):
+   - ✅ `RouteMetrics`: agregar `bikeway_weight` y `bikeway_percentage` (0-100%)
+   - ✅ `find_route()`: acepta `bikeway_weight` opcional, pasa a `edge_cost()`
+   - ✅ `compute_route_metrics()`: calcula porcentaje de ruta en ciclovías dedicadas
+
+4. **API REST Actualizada** (`src/api/app.py`, `src/api/schemas.py`):
+   - ✅ Query parameter: `bikeway_weight` (0-10, default 0.0)
+   - ✅ Response field: `bikeway_percentage` siempre incluido en `RouteResponse`
+   - ✅ Endpoint `/route`: integra preferencia de ciclovías en ruteo
+
+5. **Streamlit UI Mejorada** (`app_streamlit.py`):
+   - ✅ Slider "Preferencia por Ciclovías" en sidebar (0-10, step 0.5)
+   - ✅ Métrica dinámica: "Ciclovías en la ruta" con % y clasificación emoji
+   - ✅ Clasificaciones: 🚴 Muchas (≥50%), 🚴 Algunas (≥20%), 🚗 Pocas (<20%)
+
+**Validación:**
+- ✅ `main.py`: función backward-compatible, funciona sin cambios
+- ✅ API REST: responde con `bikeway_percentage` en `RouteResponse`
+- ✅ Streamlit: sintaxis válida, slider e integración funcionan
+
+**Cambios de API:**
+```bash
+# Sin preferencia (original)
+GET /route?origin_lat=...&elevation_weight=5.0
+→ bikeway_percentage: 0.0 (no existe preferencia de ciclovías)
+
+# Con preferencia (nuevo)
+GET /route?origin_lat=...&elevation_weight=5.0&bikeway_weight=5.0
+→ bikeway_percentage: 45.7 (45.7% de ruta en ciclovías)
+```
+
 ---
 
 ## Notas para el agente en futuras sesiones
@@ -290,4 +509,5 @@ open http://127.0.0.1:8000/docs
 5. `nearest_nodes(G, lon, lat)` — OSMnx recibe **lon antes que lat**
 6. Las coordenadas en nodos OSMnx están en `node["y"]` (lat) y `node["x"]` (lon)
 7. La API carga el grafo UNA SOLA VEZ en el contexto `lifespan` de FastAPI; no modificar esto
-8. Actualizar este archivo al cerrar cada sesión con cambios, decisiones y resultados nuevos
+8. **Grafo con ciclovías**: el atributo `is_dedicated_bikeway` ya está marcado en todas las aristas desde Fase 5
+9. Actualizar este archivo al cerrar cada sesión con cambios, decisiones y resultados nuevos
