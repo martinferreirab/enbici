@@ -9,8 +9,8 @@ import requests
 logger = logging.getLogger(__name__)
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
-MONTEVIDEO_LAT = -34.9011
-MONTEVIDEO_LON = -56.1645
+MONTEVIDEO_LAT = -34.9060
+MONTEVIDEO_LON = -56.1996
 
 
 @dataclass(frozen=True)

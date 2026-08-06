@@ -7,6 +7,7 @@ from src.api.schemas import RouteResponse, WindMetrics
 from src.api.weather import fetch_wind_data
 from src.graph.loader import load_montevideo_graph
 from src.routing.pathfinder import find_route, nearest_node, compute_route_metrics
+from src.utils.geocoding import geocode_place
 from src.visualization.map_export import export_route_map
 
 # Global graph instance (loaded once on startup)
@@ -37,10 +38,12 @@ app.mount("/static", StaticFiles(directory="output"), name="static")
 
 @app.get("/route", response_model=RouteResponse, tags=["routing"])
 async def get_route(
-    origin_lat: float = Query(..., description="Origin latitude"),
-    origin_lon: float = Query(..., description="Origin longitude"),
-    dest_lat: float = Query(..., description="Destination latitude"),
-    dest_lon: float = Query(..., description="Destination longitude"),
+    origin_place: str | None = Query(default=None, description="Origin place name (e.g., 'Plaza Independencia')"),
+    origin_lat: float | None = Query(default=None, description="Origin latitude (use origin_place instead if available)"),
+    origin_lon: float | None = Query(default=None, description="Origin longitude (use origin_place instead if available)"),
+    dest_place: str | None = Query(default=None, description="Destination place name (e.g., 'Cerro de Montevideo')"),
+    dest_lat: float | None = Query(default=None, description="Destination latitude (use dest_place instead if available)"),
+    dest_lon: float | None = Query(default=None, description="Destination longitude (use dest_place instead if available)"),
     elevation_weight: float = Query(
         default=5.0,
         ge=0,
@@ -63,12 +66,45 @@ async def get_route(
     """
     Calculate optimal bike route from origin to destination.
 
+    Accepts either place names (e.g., "Plaza Independencia") or coordinates (lat/lon).
+    If both are provided, place names take precedence.
+
     Returns route metrics and URL to the generated map.
     """
     if G is None:
         raise HTTPException(status_code=500, detail="Graph not initialized")
 
     try:
+        # Resolve origin coordinates
+        if origin_place:
+            coords = geocode_place(origin_place)
+            if not coords:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Origin place not found: '{origin_place}'"
+                )
+            origin_lat, origin_lon = coords.lat, coords.lon
+        elif origin_lat is None or origin_lon is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Provide either origin_place or both origin_lat & origin_lon"
+            )
+
+        # Resolve destination coordinates
+        if dest_place:
+            coords = geocode_place(dest_place)
+            if not coords:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Destination place not found: '{dest_place}'"
+                )
+            dest_lat, dest_lon = coords.lat, coords.lon
+        elif dest_lat is None or dest_lon is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Provide either dest_place or both dest_lat & dest_lon"
+            )
+
         # Fetch wind data if needed
         wind_data = None
         if wind_weight > 0:
