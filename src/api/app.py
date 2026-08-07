@@ -56,11 +56,9 @@ async def get_route(
         le=10,
         description="Wind weight factor (0-10, default 0.0, disabled if 0)",
     ),
-    bikeway_weight: float = Query(
-        default=0.0,
-        ge=0,
-        le=10,
-        description="Bikeway discount factor (0-10, default 0.0, prefers bikeways if > 0)",
+    allow_parks: bool = Query(
+        default=True,
+        description="Allow traversing park/plaza internal paths (True) or penalize (False)",
     ),
 ) -> RouteResponse:
     """
@@ -119,7 +117,7 @@ async def get_route(
                 status_code=400, detail="Origin and destination are the same node"
             )
 
-        # Find route with wind data and bikeway preferences if available
+        # Find route with wind data and park preferences
         path = find_route(
             G,
             origin_node,
@@ -127,7 +125,7 @@ async def get_route(
             elevation_weight=elevation_weight,
             wind_data=wind_data,
             wind_weight=wind_weight,
-            bikeway_weight=bikeway_weight,
+            allow_parks=allow_parks,
         )
 
         if not path:
@@ -140,7 +138,7 @@ async def get_route(
             elevation_weight=elevation_weight,
             wind_data=wind_data,
             wind_weight=wind_weight,
-            bikeway_weight=bikeway_weight,
+            allow_parks=allow_parks,
         )
 
         # Export map
@@ -169,7 +167,6 @@ async def get_route(
             node_count=metrics.node_count,
             map_url="/static/ruta_montevideo.html",
             wind_metrics=wind_metrics,
-            bikeway_percentage=metrics.bikeway_percentage,
         )
 
     except HTTPException:

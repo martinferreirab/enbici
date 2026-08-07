@@ -18,6 +18,3 @@ class RouteResponse(BaseModel):
     wind_metrics: WindMetrics | None = Field(
         None, description="Wind condition metrics if wind_weight > 0"
     )
-    bikeway_percentage: float = Field(
-        ..., description="Percentage of route on dedicated bikeways (0-100)"
-    )

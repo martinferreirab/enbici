@@ -27,8 +27,6 @@ class RouteMetrics:
     wind_weight: float = 0.0
     average_wind_speed_ms: float = 0.0
     average_headwind_factor: float = 0.0
-    bikeway_weight: float = 0.0
-    bikeway_percentage: float = 0.0
 
 
 def nearest_node(G: DiGraph, lat: float, lon: float) -> int:
@@ -43,7 +41,7 @@ def find_route(
     elevation_weight: float,
     wind_data: WindData | None = None,
     wind_weight: float = 0.0,
-    bikeway_weight: float = 0.0,
+    allow_parks: bool = True,
 ) -> list[int]:
     """Calcula la ruta de costo mínimo entre dos nodos (Dijkstra)."""
 
@@ -64,8 +62,8 @@ def find_route(
             wind_data=wind_data,
             wind_weight=wind_weight,
             edge_bearing_deg=edge_bearing,
-            is_bikeway=data.get("is_dedicated_bikeway", False),
-            bikeway_weight=bikeway_weight,
+            is_park_path=data.get("is_park_path", False),
+            allow_parks=allow_parks,
         )
 
     return nx.shortest_path(G, origin_node, dest_node, weight=weight_func)
@@ -77,12 +75,11 @@ def compute_route_metrics(
     elevation_weight: float,
     wind_data: WindData | None = None,
     wind_weight: float = 0.0,
-    bikeway_weight: float = 0.0,
+    allow_parks: bool = True,
 ) -> RouteMetrics:
-    """Calcula distancia total, desnivel y métricas de viento y ciclovías de una ruta."""
+    """Calcula distancia total, desnivel y métricas de viento de una ruta."""
     total_distance = 0.0
     total_gain = 0.0
-    bikeway_distance = 0.0
     wind_speed_sum = 0.0
     headwind_factor_sum = 0.0
     edge_count = 0
@@ -95,10 +92,6 @@ def compute_route_metrics(
         elev_u = G.nodes[u].get("elevation", 0.0)
         elev_v = G.nodes[v].get("elevation", 0.0)
         total_gain += max(0.0, elev_v - elev_u)
-
-        # Track bikeway distance
-        if edge_data.get("is_dedicated_bikeway", False):
-            bikeway_distance += length
 
         # Calculate wind metrics
         if wind_data and wind_weight > 0:
@@ -126,11 +119,6 @@ def compute_route_metrics(
     average_headwind_factor = (
         headwind_factor_sum / edge_count if edge_count > 0 else 0.0
     )
-    bikeway_percentage = (
-        (bikeway_distance / total_distance * 100.0)
-        if total_distance > 0
-        else 0.0
-    )
 
     return RouteMetrics(
         elevation_weight=elevation_weight,
@@ -140,6 +128,4 @@ def compute_route_metrics(
         wind_weight=wind_weight,
         average_wind_speed_ms=average_wind_speed,
         average_headwind_factor=average_headwind_factor,
-        bikeway_weight=bikeway_weight,
-        bikeway_percentage=bikeway_percentage,
     )

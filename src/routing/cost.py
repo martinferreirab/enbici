@@ -79,13 +79,14 @@ def edge_cost(
     wind_data: WindData | None = None,
     wind_weight: float = 0.0,
     edge_bearing_deg: float | None = None,
-    is_bikeway: bool = False,
-    bikeway_weight: float = 0.0,
+    is_park_path: bool = False,
+    allow_parks: bool = True,
 ) -> float:
     """
-    Calculate edge cost with elevation, wind penalties, and bikeway discounts.
+    Calculate edge cost with elevation, wind penalties, and park path control.
 
-    Fórmula: length * (1 + elevation_weight * max(0, grade)) * (1 - bikeway_discount) * wind_penalty
+    Fórmula: length * (1 + elevation_weight * grade_penalty) * wind_penalty
+    Grade penalty is non-linear: quadratic scaling for grades > 3% to amplify cost of steep sections.
 
     Args:
         length: Edge length in meters
@@ -94,16 +95,21 @@ def edge_cost(
         wind_data: Current wind conditions (speed_ms, direction_degrees)
         wind_weight: Wind penalty factor (0-10)
         edge_bearing_deg: Edge bearing in degrees (0-360), required if wind_data provided
-        is_bikeway: Whether edge is a dedicated bikeway
-        bikeway_weight: Bikeway discount factor (0-10, discount applied on bikeways)
+        is_park_path: Whether edge is a park/plaza internal path
+        allow_parks: Whether to allow traversing park paths (True) or penalize (False)
     """
-    uphill_grade = min(max(grade, 0.0), MAX_GRADE)
-    base_cost = length * (1.0 + elevation_weight * uphill_grade)
+    # Penalize or block park paths if not allowed
+    if is_park_path and not allow_parks:
+        return length * 10.0  # 10x cost penalty for park paths when not allowed
 
-    # Apply bikeway discount if applicable
-    if is_bikeway and bikeway_weight > 0:
-        bikeway_discount = (bikeway_weight / 10.0) * 0.5  # Max 50% discount
-        base_cost = base_cost * (1.0 - bikeway_discount)
+    uphill_grade = min(max(grade, 0.0), MAX_GRADE)
+
+    # Non-linear penalty for steep grades (>3%) to force visible deviations
+    if uphill_grade > 0.03:
+        steep_portion = uphill_grade - 0.03
+        uphill_grade = 0.03 + steep_portion ** 2
+
+    base_cost = length * (1.0 + elevation_weight * uphill_grade)
 
     if wind_data and wind_weight > 0 and edge_bearing_deg is not None:
         wind_penalty = _calculate_wind_penalty(

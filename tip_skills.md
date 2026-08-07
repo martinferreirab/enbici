@@ -1,5 +1,6 @@
 # Instructions & Project Skills for enbici
 
+No github unless asked to
 ## 1. Geospatial & Graph Optimization Skill (OSMnx + NetworkX)
 - ALWAYS load the cached graph file (`.graphml`) if it exists locally before attempting to query OpenStreetMap via `osmnx`. Downloading OSM data on every run is strictly forbidden.
 - When working with `networkx`, ensure graph edge attributes include length (meters) and calculated grade (percentage).

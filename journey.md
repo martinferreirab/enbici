@@ -673,9 +673,65 @@ uv run streamlit run app_streamlit.py
 
 ---
 
-## Estado Final (2026-08-04)
+## Refactor (2026-08-06)
 
-**✅ PROYECTO COMPLETAMENTE FUNCIONAL**
+**Cambios globales — Limpieza y reorganización:**
+
+1. **Eliminadas ciclovías** — Removidas todas las referencias a `bikeway_weight`, `is_dedicated_bikeway`, y `bikeway_percentage`:
+   - `src/graph/loader.py`: Eliminada función `_mark_bikeways()` y `_graph_has_bikeways()`
+   - `src/routing/cost.py`: Removido parámetro `is_bikeway` y `bikeway_weight` de `edge_cost()`
+   - `src/routing/pathfinder.py`: Removido campo `bikeway_weight` y `bikeway_percentage` de `RouteMetrics`
+   - `src/api/schemas.py`: Removido campo `bikeway_percentage` de `RouteResponse`
+   - `src/api/app.py`: Removido parámetro `bikeway_weight` de endpoint `/route`
+   - `app_streamlit.py`: Removido slider "Ciclovías" y métricas de ciclovías
+
+2. **Eliminados presets** — Removidas ubicaciones predefinidas:
+   - `app_streamlit.py`: Eliminados botones "Plaza Ind. → Fac. Ing.", "Pocitos → Cerro", "Puerto Viejo → Pocitos"
+   - Solo queda búsqueda por nombre con geocoding (Nominatim)
+
+3. **UI Layout Reordenado** — Nuevo orden cuando ruta está activa:
+   1. **Mapa Folium interactivo** (st_folium) — antes que métricas
+   2. **Resumen de métricas** — Distancia, Desnivel, Viento (sin "Cantidad de nodos")
+   3. **Perfil de elevación** — Gráfico Plotly (área)
+
+**Validación:**
+- ✅ `main.py`: Ruteo funciona (5.11 km, 84m desnivel, 59 nodos)
+- ✅ API REST: Endpoint `/route` responde sin `bikeway_percentage` ni `bikeway_weight`
+- ✅ Sintaxis: Todos los archivos compilados sin errores
+- ✅ UI: Layout reorganizado con orden correcto (mapa → métricas → elevación)
+
+---
+
+## Resumen de Mejoras (2026-08-06 — Anterior)
+
+**3 nuevas features implementadas:**
+
+1. **Penalización No Lineal por Subidas** — Escalado cuadrático para pendientes > 3%
+   - `src/routing/cost.py`: Fórmula `uphill_grade = 0.03 + (grade - 0.03)²`
+   - Desvíos más visibles en repechos empinados
+   - Validación: Grade 8% cuesta ~13% más que grade 5%
+
+2. **Permiso para Atravesar Parques y Plazas** — Checkbox en UI
+   - `src/graph/loader.py`: `_mark_park_paths()` detecta footway/path/pedestrian
+   - `src/routing/cost.py`: `allow_parks: bool` con penalización 10x si False
+   - `app_streamlit.py`: Nuevo checkbox "Atravesar parques y plazas"
+   - `src/api/app.py`: Query parameter `allow_parks` en `/route`
+   - Validación: Park path denied cuesta 10x vs allowed
+
+3. **Perfil de Elevación Interactivo** — Gráfico Plotly en UI
+   - `app_streamlit.py`: Gráfico área con elevación vs distancia acumulada
+   - Plotly 5.18.0+ agregado a dependencias
+   - Clave dinámica para re-renderizado en nuevas rutas
+
+**Cambios de API:**
+- `/route` ahora acepta `allow_parks: bool` (default True)
+- Session state ampliado para persistencia de `allow_parks` y elevation profile data
+
+---
+
+## Estado Final (2026-08-04 → 2026-08-06)
+
+**✅ PROYECTO COMPLETAMENTE FUNCIONAL + 3 FEATURES**
 
 El proyecto enbici cuenta con las 6 fases implementadas y validadas:
 
