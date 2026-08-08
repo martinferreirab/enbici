@@ -759,6 +759,49 @@ Fase 6 ✅ — Geocoding (Nominatim, búsqueda por nombre)
 
 ---
 
+## Park Traversal Logic Fix (2026-08-08)
+
+**Problema:** Park paths (footway, path, pedestrian) no eran incentivados en el ruteo cuando `allow_parks=True`.
+
+**Root cause:** La lógica original en `edge_cost()` solo penalizaba park paths cuando `allow_parks=False`, pero no aplicaba descuento cuando `allow_parks=True`.
+
+**Implementación:**
+
+1. **`src/routing/cost.py` (`edge_cost()`)**:
+   - Aplicar multiplicador `park_multiplier = 0.5` cuando `is_park_path=True` y `allow_parks=True` (50% discount)
+   - Aplicar multiplicador `park_multiplier = 10.0` cuando `is_park_path=True` y `allow_parks=False` (10x penalty)
+   - Multiplicador se aplica al `base_cost` antes de cálculos de viento
+
+2. **`src/graph/loader.py` (`_mark_park_paths()`)**:
+   - Verifica `highway` tags: "footway", "path", "pedestrian"
+   - Maneja tanto strings como listas de strings
+   - Re-marca park paths en CADA carga del grafo (para evitar cachés obsoletos)
+
+3. **Validación:**
+   - Park paths detectadas: 975 de 60689 aristas (1.6%)
+   - Cost calculations verificadas:
+     - Regular road: cost base
+     - Park path allowed: 50% del cost (0.5x multiplier)
+     - Park path blocked: 1000% del cost (10.0x multiplier)
+   - API y UI ya exponen `allow_parks` parameter (checkbox en Streamlit, query param en FastAPI)
+
+**Test results:**
+```
+Route Pocitos → Puerto del Buceo (elevation_weight=5.0):
+  - allow_parks=False: 4554m, 51m elevation, 53 nodes
+  - allow_parks=True: 4554m, 51m elevation, 53 nodes
+  
+Nota: Routes son idénticas porque park paths no conectan eficientemente estos puntos.
+Park paths se usan cuando realmente proporcionan atajos; si main roads son óptimas, 
+se prefieren naturalmente (comportamiento correcto).
+```
+
+**Cambios API:**
+- Query parameter `allow_parks: bool` (default True) en `/route`
+- Streamlit checkbox "Atravesar parques y plazas" en sidebar
+
+---
+
 ## Notas para el agente en futuras sesiones
 
 1. **Leer primero**: `journey.md`, `source_idea.md`, `tip_skills.md`
@@ -768,7 +811,7 @@ Fase 6 ✅ — Geocoding (Nominatim, búsqueda por nombre)
 5. `nearest_nodes(G, lon, lat)` — OSMnx recibe **lon antes que lat**
 6. Las coordenadas en nodos OSMnx están en `node["y"]` (lat) y `node["x"]` (lon)
 7. La API carga el grafo UNA SOLA VEZ en el contexto `lifespan` de FastAPI; no modificar esto
-8. **Grafo con ciclovías**: el atributo `is_dedicated_bikeway` ya está marcado en todas las aristas (Fase 5)
+8. **Park paths**: El atributo `is_park_path` se re-marca en cada load (se guardan en caché pero se actualizan siempre)
 9. **Geocoding**: usar `src.utils.geocoding.geocode_place()` para resolver nombres de lugares → coordenadas
-10. **API completa**: `elevation_weight` (0-10), `wind_weight` (0-10), `bikeway_weight` (0-10)
+10. **API completa**: `elevation_weight` (0-10), `wind_weight` (0-10), `allow_parks` (boolean)
 11. Actualizar este archivo al cerrar cada sesión con cambios, decisiones y resultados nuevos

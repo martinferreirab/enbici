@@ -85,8 +85,9 @@ def edge_cost(
     """
     Calculate edge cost with elevation, wind penalties, and park path control.
 
-    Fórmula: length * (1 + elevation_weight * grade_penalty) * wind_penalty
+    Fórmula: length * (1 + elevation_weight * grade_penalty) * wind_penalty * park_multiplier
     Grade penalty is non-linear: quadratic scaling for grades > 3% to amplify cost of steep sections.
+    Park paths receive incentive discount when allowed (0.5x) or penalty when blocked (10.0x).
 
     Args:
         length: Edge length in meters
@@ -98,9 +99,10 @@ def edge_cost(
         is_park_path: Whether edge is a park/plaza internal path
         allow_parks: Whether to allow traversing park paths (True) or penalize (False)
     """
-    # Penalize or block park paths if not allowed
-    if is_park_path and not allow_parks:
-        return length * 10.0  # 10x cost penalty for park paths when not allowed
+    # Apply park path multiplier before other calculations
+    park_multiplier = 1.0
+    if is_park_path:
+        park_multiplier = 0.5 if allow_parks else 10.0
 
     uphill_grade = min(max(grade, 0.0), MAX_GRADE)
 
@@ -109,7 +111,7 @@ def edge_cost(
         steep_portion = uphill_grade - 0.03
         uphill_grade = 0.03 + steep_portion ** 2
 
-    base_cost = length * (1.0 + elevation_weight * uphill_grade)
+    base_cost = length * (1.0 + elevation_weight * uphill_grade) * park_multiplier
 
     if wind_data and wind_weight > 0 and edge_bearing_deg is not None:
         wind_penalty = _calculate_wind_penalty(

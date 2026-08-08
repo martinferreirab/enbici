@@ -84,9 +84,10 @@ def load_montevideo_graph() -> nx.DiGraph:
         enrich_graph_with_elevation(G)
         _save_to_cache(G)
 
-    if not _graph_has_park_paths(G):
-        _mark_park_paths(G)
-        _save_to_cache(G)
+    # Always re-mark park paths to ensure correct detection
+    # (cache may have incorrect markings from previous runs)
+    _mark_park_paths(G)
+    _save_to_cache(G)
 
     digraph = ox.convert.to_digraph(G)
     logger.info(
