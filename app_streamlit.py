@@ -130,8 +130,16 @@ with st.sidebar:
         help="Permite usar senderos internos de áreas verdes",
     )
 
+    max_against_traffic_blocks = st.selectbox(
+        "Tolerancia a contramano",
+        options=[0, 1, 2, 3],
+        index=0,
+        format_func=lambda x: "Deshabilitado" if x == 0 else f"{x} bloque(s)",
+        help="Máximo de cuadras permitidas en sentido contrario (0-3)",
+    )
+
     # Clear route if weights change (to avoid showing old metrics with new weights)
-    current_route_key = f"route_{st.session_state.origin_coords}_{st.session_state.dest_coords}_{elevation_weight}_{wind_weight}_{allow_parks}"
+    current_route_key = f"route_{st.session_state.origin_coords}_{st.session_state.dest_coords}_{elevation_weight}_{wind_weight}_{allow_parks}_{max_against_traffic_blocks}"
     if st.session_state.last_route_key and st.session_state.last_route_key != current_route_key:
         st.session_state.calculated_route = None
     st.session_state.last_route_key = current_route_key
@@ -175,6 +183,7 @@ if calculate_button:
                     wind_data=wind_data,
                     wind_weight=wind_weight,
                     allow_parks=allow_parks,
+                    max_against_traffic_blocks=max_against_traffic_blocks,
                 )
 
                 if path:
@@ -185,6 +194,7 @@ if calculate_button:
                         wind_data=wind_data,
                         wind_weight=wind_weight,
                         allow_parks=allow_parks,
+                        max_against_traffic_blocks=max_against_traffic_blocks,
                     )
 
                     # Store route data in session state for persistence across re-runs
@@ -199,7 +209,8 @@ if calculate_button:
                         "elevation_weight": elevation_weight,
                         "wind_weight": wind_weight,
                         "allow_parks": allow_parks,
-                        "map_key": f"map_{origin_lat:.4f}_{origin_lon:.4f}_{dest_lat:.4f}_{dest_lon:.4f}_{elevation_weight}_{wind_weight}_{allow_parks}",
+                        "max_against_traffic_blocks": max_against_traffic_blocks,
+                        "map_key": f"map_{origin_lat:.4f}_{origin_lon:.4f}_{dest_lat:.4f}_{dest_lon:.4f}_{elevation_weight}_{wind_weight}_{allow_parks}_{max_against_traffic_blocks}",
                     }
 
                     st.success("✅ Ruta calculada exitosamente")
@@ -240,12 +251,13 @@ if st.session_state.calculated_route:
         tiles="OpenStreetMap",
     )
 
+    # Route (blue)
     folium.PolyLine(
         route_coords,
-        color="blue",
-        weight=3,
-        opacity=0.8,
-        popup="Ruta calculada",
+        color="#2563eb",
+        weight=5,
+        opacity=0.85,
+        popup="Ruta",
     ).add_to(m)
 
     folium.Marker(
@@ -264,47 +276,51 @@ if st.session_state.calculated_route:
 
     st.divider()
 
-    # 2. Route Summary Metrics
-    st.subheader("📊 Resumen de la Ruta")
+    # 2. Route Metrics
+    st.subheader("📊 Métricas de Ruta")
 
     col1, col2, col3 = st.columns(3)
-
     with col1:
         st.metric(
             "📏 Distancia",
             f"{metrics.total_distance_m / 1000:.2f} km",
         )
-
     with col2:
         st.metric(
             "⛰️ Desnivel",
             f"{metrics.total_elevation_gain_m:.0f} m",
         )
-
     with col3:
         if wind_data and route_data["wind_weight"] > 0:
-            wind_dir_cardinal = _get_wind_cardinal(wind_data.direction_degrees)
-            st.metric(
-                "💨 Viento",
-                f"{wind_data.speed_ms:.1f} m/s",
-                f"{wind_data.direction_degrees:.0f}° {wind_dir_cardinal}",
-            )
+            # Extract representative wind data from WindGrid
+            representative_wind = next(iter(wind_data.points.values()), None) if wind_data.points else None
+            if representative_wind:
+                wind_dir_cardinal = _get_wind_cardinal(representative_wind.direction_degrees)
+                st.metric(
+                    "💨 Viento",
+                    f"{representative_wind.speed_ms:.1f} m/s",
+                    f"{representative_wind.direction_degrees:.0f}° {wind_dir_cardinal}",
+                )
+            else:
+                st.metric("💨 Viento", "N/A")
         else:
             st.metric("💨 Viento", "—" if route_data["wind_weight"] == 0 else "N/A")
 
     # Wind metrics if available
     if wind_data and route_data["wind_weight"] > 0:
-        col1, col2 = st.columns(2)
-        wind_cardinal = _get_wind_cardinal(wind_data.direction_degrees)
-        with col1:
-            st.info(
-                f"**Dirección del viento**: {wind_data.direction_degrees:.0f}° ({wind_cardinal})"
-            )
-        with col2:
-            headwind_type = "Tailwind ↗️" if metrics.average_headwind_factor < 0.33 else "Mixed" if metrics.average_headwind_factor < 0.66 else "Headwind ↙️"
-            st.info(
-                f"**Factor de viento de frente**: {metrics.average_headwind_factor:.1%} ({headwind_type})"
-            )
+        representative_wind = next(iter(wind_data.points.values()), None) if wind_data.points else None
+        if representative_wind:
+            col1, col2 = st.columns(2)
+            wind_cardinal = _get_wind_cardinal(representative_wind.direction_degrees)
+            with col1:
+                st.info(
+                    f"**Dirección del viento**: {representative_wind.direction_degrees:.0f}° ({wind_cardinal})"
+                )
+            with col2:
+                headwind_type = "Tailwind ↗️" if metrics.average_headwind_factor < 0.33 else "Mixed" if metrics.average_headwind_factor < 0.66 else "Headwind ↙️"
+                st.info(
+                    f"**Factor de viento de frente**: {metrics.average_headwind_factor:.1%} ({headwind_type})"
+                )
 
     st.divider()
 
@@ -348,7 +364,7 @@ if st.session_state.calculated_route:
     )
     st.plotly_chart(fig, use_container_width=True, key=f"elevation_profile_{map_key}")
 
-    # Export and save HTML map
+    # Export map
     map_path = "output/ruta_streamlit.html"
     export_route_map(
         graph,

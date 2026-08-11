@@ -9,8 +9,14 @@ import requests
 logger = logging.getLogger(__name__)
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
-MONTEVIDEO_LAT = -34.9060
-MONTEVIDEO_LON = -56.1996
+
+# Wind grid points across Montevideo
+WIND_GRID_POINTS = {
+    "sw": (-34.9060, -56.2000),    # Rambla Sur / Centro-Oeste
+    "se": (-34.9150, -56.1400),    # Pocitos / Rambla Este
+    "n": (-34.8550, -56.2000),     # Prado / Centro-Norte
+    "nw": (-34.8200, -56.2500),    # Colón / Pasaje
+}
 
 
 @dataclass(frozen=True)
@@ -20,16 +26,44 @@ class WindData:
     direction_degrees: float  # Wind direction in degrees (0-360, from north clockwise)
 
 
-def fetch_wind_data() -> WindData | None:
-    """
-    Fetch current wind speed and direction for Montevideo from Open-Meteo.
+@dataclass(frozen=True)
+class WindGrid:
+    """Wind data at multiple grid points across Montevideo."""
+    points: dict[str, WindData]  # Grid point name -> WindData
 
-    Returns None if the API call fails.
+    def get_wind_at_location(self, lat: float, lon: float) -> WindData | None:
+        """Get wind data for nearest grid point to a location."""
+        if not self.points:
+            return None
+
+        min_distance = float("inf")
+        nearest_key = None
+
+        for key, (grid_lat, grid_lon) in WIND_GRID_POINTS.items():
+            # Simple Euclidean distance (good enough for small area)
+            distance = ((lat - grid_lat) ** 2 + (lon - grid_lon) ** 2) ** 0.5
+            if distance < min_distance:
+                min_distance = distance
+                nearest_key = key
+
+        return self.points.get(nearest_key) if nearest_key else None
+
+
+def fetch_wind_data() -> WindGrid | None:
+    """
+    Fetch current wind speed and direction for 4 grid points across Montevideo.
+
+    Uses a single batch HTTP request to Open-Meteo API.
+    Returns WindGrid with wind data at each point, or None if API call fails.
     """
     try:
+        # Build batch request with all 4 grid points
+        latitudes = [coords[0] for coords in WIND_GRID_POINTS.values()]
+        longitudes = [coords[1] for coords in WIND_GRID_POINTS.values()]
+
         params = {
-            "latitude": MONTEVIDEO_LAT,
-            "longitude": MONTEVIDEO_LON,
+            "latitude": ",".join(str(lat) for lat in latitudes),
+            "longitude": ",".join(str(lon) for lon in longitudes),
             "current": "wind_speed_10m,wind_direction_10m",
             "timezone": "America/Montevideo",
         }
@@ -38,57 +72,29 @@ def fetch_wind_data() -> WindData | None:
         response.raise_for_status()
 
         data = response.json()
-        current = data.get("current", {})
 
-        wind_speed = current.get("wind_speed_10m", 0.0)
-        wind_direction = current.get("wind_direction_10m", 0.0)
+        # API returns a list when querying multiple coordinates
+        if not isinstance(data, list):
+            data = [data]
 
-        logger.info(f"Wind data fetched: {wind_speed:.1f} m/s from {wind_direction:.0f}°")
+        wind_points = {}
+        for idx, (key, _coords) in enumerate(WIND_GRID_POINTS.items()):
+            if idx < len(data):
+                current = data[idx].get("current", {})
+                wind_speed_kmh = float(current.get("wind_speed_10m", 0.0))
+                wind_direction = float(current.get("wind_direction_10m", 0.0))
 
-        return WindData(
-            speed_ms=float(wind_speed),
-            direction_degrees=float(wind_direction),
-        )
+                # Convert km/h to m/s
+                wind_speed_ms = wind_speed_kmh / 3.6
+
+                wind_points[key] = WindData(
+                    speed_ms=wind_speed_ms,
+                    direction_degrees=wind_direction,
+                )
+                logger.info(f"Wind at {key}: {wind_speed_ms:.1f} m/s from {wind_direction:.0f}°")
+
+        return WindGrid(points=wind_points)
+
     except Exception as e:
         logger.warning(f"Failed to fetch wind data from Open-Meteo: {e}")
         return None
-
-
-def calculate_wind_penalty(
-    wind_direction_deg: float,
-    edge_bearing_deg: float,
-    wind_speed_ms: float,
-    wind_weight: float,
-) -> float:
-    """
-    Calculate wind cost penalty for an edge based on wind direction vs edge bearing.
-
-    Returns a multiplier (1.0 = no penalty, > 1.0 = increased cost).
-
-    The penalty increases when wind is headwind (0-90°) and decreases with tailwind (180-270°).
-    Formula: 1.0 + (wind_weight / 10) * wind_speed * (1 + cos(angle_to_wind))
-    """
-    if wind_weight <= 0 or wind_speed_ms <= 0:
-        return 1.0
-
-    # Normalize angles to 0-360
-    wind_dir = wind_direction_deg % 360
-    edge_bearing = edge_bearing_deg % 360
-
-    # Calculate angle between wind direction and edge bearing
-    # This is the angle a cyclist would experience relative to their direction of travel
-    angle_diff = (wind_dir - edge_bearing) % 360
-
-    # Convert to radians, -180 to 180 range for easier calculation
-    if angle_diff > 180:
-        angle_diff = angle_diff - 360
-
-    import math
-
-    # cos(angle_diff) = 1 when wind is from behind (headwind), -1 when tailwind
-    # We want to penalize headwind, so we use (1 + cos(angle_diff))
-    cos_angle = math.cos(math.radians(angle_diff))
-    headwind_factor = 1.0 + cos_angle  # Range: 0 (tailwind) to 2 (headwind)
-
-    penalty = 1.0 + (wind_weight / 10.0) * wind_speed_ms * (headwind_factor / 2.0)
-    return penalty

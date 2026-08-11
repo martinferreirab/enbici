@@ -27,7 +27,6 @@ def export_route_map(
     metrics: RouteMetrics,
     output_path: Path | str,
     *,
-    comparison_metrics: RouteMetrics | None = None,
     title: str = "Ruta enbici - Montevideo",
 ) -> Path:
     """
@@ -44,6 +43,7 @@ def export_route_map(
 
     fmap = folium.Map(location=[center_lat, center_lon], zoom_start=14, tiles="OpenStreetMap")
 
+    # Route (solid blue line)
     folium.PolyLine(
         coords,
         color="#2563eb",
@@ -71,12 +71,6 @@ def export_route_map(
         f"Desnivel +: {metrics.total_elevation_gain_m:.1f} m<br>"
         f"Nodos: {metrics.node_count}"
     )
-    if comparison_metrics is not None:
-        metrics_html += (
-            f"<br><hr><b>Comparación (peso {comparison_metrics.elevation_weight})</b><br>"
-            f"Distancia: {comparison_metrics.total_distance_m / 1000:.2f} km<br>"
-            f"Desnivel +: {comparison_metrics.total_elevation_gain_m:.1f} m"
-        )
 
     fmap.get_root().html.add_child(
         Element(

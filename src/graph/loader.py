@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import pickle
 from pathlib import Path
 
 import networkx as nx
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = PROJECT_ROOT / "data"
 GRAPH_CACHE_PATH = DATA_DIR / "montevideo.graphml"
+GRAPH_PICKLE_PATH = DATA_DIR / "montevideo_final.pkl"
 PLACE_QUERY = "Montevideo, Uruguay"
 
 
@@ -64,35 +66,85 @@ def _mark_park_paths(G: nx.MultiDiGraph) -> None:
         data["is_park_path"] = is_park_path
 
 
+def _add_against_traffic_edges(G: nx.MultiDiGraph) -> None:
+    """Add reverse edges for oneway streets, tagged as against-traffic.
+
+    Idempotent: clears any previously-added against-traffic edges first, so
+    calling this repeatedly (e.g. on every load) never duplicates them.
+    """
+    existing_against_traffic = [
+        (u, v, key)
+        for u, v, key, data in G.edges(keys=True, data=True)
+        if data.get("is_against_traffic", False)
+    ]
+    for u, v, key in existing_against_traffic:
+        G.remove_edge(u, v, key)
+
+    edges_to_add = []
+    for u, v, key, data in G.edges(keys=True, data=True):
+        oneway = data.get("oneway", False)
+        if oneway is True or oneway == "yes":
+            # This is a one-way street; create a reverse edge
+            reverse_data = data.copy()
+            reverse_data["is_against_traffic"] = True
+            edges_to_add.append((v, u, reverse_data))
+
+    for u, v, reverse_data in edges_to_add:
+        G.add_edge(u, v, **reverse_data)
+
+
+def _save_pickle_atomic(digraph: nx.DiGraph) -> None:
+    """Persiste el DiGraph final como pickle binario, de forma atómica."""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    tmp_path = GRAPH_PICKLE_PATH.with_suffix(".pkl.tmp")
+    with tmp_path.open("wb") as f:
+        pickle.dump(digraph, f)
+    tmp_path.replace(GRAPH_PICKLE_PATH)
+    logger.info("Grafo final guardado en caché binaria: %s", GRAPH_PICKLE_PATH)
+
+
 def load_montevideo_graph() -> nx.DiGraph:
     """
-    Carga el grafo de Montevideo usando caché local si existe.
+    Carga el grafo de Montevideo, priorizando la caché binaria (pickle).
 
-    En la primera ejecución descarga OSM, enriquece con elevación/pendiente
-    y persiste ``data/montevideo.graphml``. Ejecuciones posteriores reutilizan
-    exclusivamente el archivo cacheado.
+    FAST PATH: si ``montevideo_final.pkl`` existe, se carga directamente sin
+    conversiones ni re-marcado de aristas (boot casi instantáneo).
+
+    FALLBACK/BUILD PATH: si no existe el pickle, se carga (o descarga) el
+    ``.graphml``, se enriquece con elevación/pendiente, se marcan park paths
+    y against-traffic edges, se convierte a DiGraph, y el resultado final se
+    persiste como pickle para que la próxima carga use el fast path.
     """
+    if GRAPH_PICKLE_PATH.exists():
+        with GRAPH_PICKLE_PATH.open("rb") as f:
+            digraph = pickle.load(f)
+        logger.info(
+            "✓ Montevideo graph loaded from binary cache: %d nodes, %d edges",
+            digraph.number_of_nodes(),
+            digraph.number_of_edges(),
+        )
+        return digraph
+
     if GRAPH_CACHE_PATH.exists():
         G = _load_from_cache()
+        # Graph already cached with elevations/grades; skip API calls
+        if not graph_has_elevation(G):
+            logger.warning("Cache missing elevation/grade data. Re-enrichment required.")
+            enrich_graph_with_elevation(G)
+            _save_to_cache(G)
     else:
         G = _download_graph()
         enrich_graph_with_elevation(G)
-        _mark_park_paths(G)
         _save_to_cache(G)
 
-    if not graph_has_elevation(G):
-        enrich_graph_with_elevation(G)
-        _save_to_cache(G)
-
-    # Always re-mark park paths to ensure correct detection
-    # (cache may have incorrect markings from previous runs)
     _mark_park_paths(G)
-    _save_to_cache(G)
+    _add_against_traffic_edges(G)
 
     digraph = ox.convert.to_digraph(G)
     logger.info(
-        "Grafo listo: %d nodos, %d aristas",
+        "✓ Montevideo graph built: %d nodes, %d edges",
         digraph.number_of_nodes(),
         digraph.number_of_edges(),
     )
+    _save_pickle_atomic(digraph)
     return digraph

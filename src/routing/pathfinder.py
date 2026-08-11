@@ -13,7 +13,7 @@ from src.routing.cost import edge_cost, _calculate_bearing
 
 if TYPE_CHECKING:
     from networkx import DiGraph
-    from src.api.weather import WindData
+    from src.api.weather import WindData, WindGrid
 
 
 @dataclass(frozen=True)
@@ -39,14 +39,17 @@ def find_route(
     origin_node: int,
     dest_node: int,
     elevation_weight: float,
-    wind_data: WindData | None = None,
+    wind_data: WindData | WindGrid | None = None,
     wind_weight: float = 0.0,
     allow_parks: bool = True,
+    max_against_traffic_blocks: int = 0,
 ) -> list[int]:
     """Calcula la ruta de costo mínimo entre dos nodos (Dijkstra)."""
 
     def weight_func(u: int, v: int, data: dict) -> float:
         edge_bearing = None
+        wind_for_edge = wind_data
+
         if wind_data and wind_weight > 0:
             # Calculate bearing from node coordinates
             lat1 = G.nodes[u].get("y", 0.0)
@@ -55,15 +58,22 @@ def find_route(
             lon2 = G.nodes[v].get("x", 0.0)
             edge_bearing = _calculate_bearing(lat1, lon1, lat2, lon2)
 
+            # If wind_data is a WindGrid, get wind for this edge's location
+            from src.api.weather import WindGrid
+            if isinstance(wind_data, WindGrid):
+                wind_for_edge = wind_data.get_wind_at_location(lat1, lon1)
+
         return edge_cost(
             data.get("length", 0.0),
             data.get("grade", 0.0),
             elevation_weight,
-            wind_data=wind_data,
+            wind_data=wind_for_edge,
             wind_weight=wind_weight,
             edge_bearing_deg=edge_bearing,
             is_park_path=data.get("is_park_path", False),
             allow_parks=allow_parks,
+            is_against_traffic=data.get("is_against_traffic", False),
+            max_against_traffic_blocks=max_against_traffic_blocks,
         )
 
     return nx.shortest_path(G, origin_node, dest_node, weight=weight_func)
@@ -73,9 +83,10 @@ def compute_route_metrics(
     G: DiGraph,
     path: list[int],
     elevation_weight: float,
-    wind_data: WindData | None = None,
+    wind_data: WindData | WindGrid | None = None,
     wind_weight: float = 0.0,
     allow_parks: bool = True,
+    max_against_traffic_blocks: int = 0,
 ) -> RouteMetrics:
     """Calcula distancia total, desnivel y métricas de viento de una ruta."""
     total_distance = 0.0
@@ -101,7 +112,16 @@ def compute_route_metrics(
             lon2 = G.nodes[v].get("x", 0.0)
             edge_bearing = _calculate_bearing(lat1, lon1, lat2, lon2)
 
-            wind_dir = wind_data.direction_degrees % 360
+            # Handle both WindData and WindGrid
+            from src.api.weather import WindGrid
+            if isinstance(wind_data, WindGrid):
+                edge_wind = wind_data.get_wind_at_location(lat1, lon1)
+                if not edge_wind:
+                    continue
+            else:
+                edge_wind = wind_data
+
+            wind_dir = edge_wind.direction_degrees % 360
             angle_diff = (wind_dir - edge_bearing) % 360
             if angle_diff > 180:
                 angle_diff = angle_diff - 360
@@ -109,7 +129,7 @@ def compute_route_metrics(
             cos_angle = math.cos(math.radians(angle_diff))
             headwind_factor = (1.0 + cos_angle) / 2.0
 
-            wind_speed_sum += wind_data.speed_ms
+            wind_speed_sum += edge_wind.speed_ms
             headwind_factor_sum += headwind_factor
             edge_count += 1
 
@@ -129,3 +149,5 @@ def compute_route_metrics(
         average_wind_speed_ms=average_wind_speed,
         average_headwind_factor=average_headwind_factor,
     )
+
+

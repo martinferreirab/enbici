@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Query, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from src.api.schemas import RouteResponse, WindMetrics
@@ -32,6 +33,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Mount static files for serving generated maps
 app.mount("/static", StaticFiles(directory="output"), name="static")
 
@@ -59,6 +67,12 @@ async def get_route(
     allow_parks: bool = Query(
         default=True,
         description="Allow traversing park/plaza internal paths (True) or penalize (False)",
+    ),
+    max_against_traffic_blocks: int = Query(
+        default=0,
+        ge=0,
+        le=3,
+        description="Max blocks (segments) to allow cycling against one-way traffic (0-3, 0=disabled)",
     ),
 ) -> RouteResponse:
     """
@@ -103,12 +117,12 @@ async def get_route(
                 detail="Provide either dest_place or both dest_lat & dest_lon"
             )
 
-        # Fetch wind data if needed
-        wind_data = None
+        # Fetch wind grid data
+        wind_grid = None
         if wind_weight > 0:
-            wind_data = fetch_wind_data()
+            wind_grid = fetch_wind_data()
 
-        # Find nearest nodes to the given coordinates
+        # Find nearest nodes
         origin_node = nearest_node(G, origin_lat, origin_lon)
         dest_node = nearest_node(G, dest_lat, dest_lon)
 
@@ -117,15 +131,16 @@ async def get_route(
                 status_code=400, detail="Origin and destination are the same node"
             )
 
-        # Find route with wind data and park preferences
+        # Find optimal route
         path = find_route(
             G,
             origin_node,
             dest_node,
             elevation_weight=elevation_weight,
-            wind_data=wind_data,
+            wind_data=wind_grid,
             wind_weight=wind_weight,
             allow_parks=allow_parks,
+            max_against_traffic_blocks=max_against_traffic_blocks,
         )
 
         if not path:
@@ -136,9 +151,10 @@ async def get_route(
             G,
             path,
             elevation_weight=elevation_weight,
-            wind_data=wind_data,
+            wind_data=wind_grid,
             wind_weight=wind_weight,
             allow_parks=allow_parks,
+            max_against_traffic_blocks=max_against_traffic_blocks,
         )
 
         # Export map
@@ -152,21 +168,23 @@ async def get_route(
             map_path,
         )
 
-        # Build wind metrics if available
+        # Build wind metrics
         wind_metrics = None
-        if wind_data:
-            wind_metrics = WindMetrics(
-                wind_speed_ms=wind_data.speed_ms,
-                wind_direction_deg=wind_data.direction_degrees,
-                average_headwind_factor=metrics.average_headwind_factor,
-            )
+        if wind_grid and wind_weight > 0:
+            first_wind = next(iter(wind_grid.points.values())) if wind_grid.points else None
+            if first_wind:
+                wind_metrics = WindMetrics(
+                    wind_speed_ms=first_wind.speed_ms,
+                    wind_direction_deg=first_wind.direction_degrees,
+                    average_headwind_factor=metrics.average_headwind_factor,
+                )
 
         return RouteResponse(
             distance_km=metrics.total_distance_m / 1000.0,
             elevation_gain_m=metrics.total_elevation_gain_m,
             node_count=metrics.node_count,
-            map_url="/static/ruta_montevideo.html",
             wind_metrics=wind_metrics,
+            map_url="/static/ruta_montevideo.html",
         )
 
     except HTTPException:

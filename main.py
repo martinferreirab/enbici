@@ -66,7 +66,6 @@ def main() -> None:
         DESTINATION,
         metrics_elevation,
         OUTPUT_DIR / "ruta_montevideo.html",
-        comparison_metrics=metrics_distance,
         title="Ruta con penalización por elevación",
     )
     print(f"\nMapa HTML guardado en: {map_path}")

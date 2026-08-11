@@ -11,10 +11,11 @@ class WindMetrics(BaseModel):
 
 
 class RouteResponse(BaseModel):
-    distance_km: float = Field(..., description="Total route distance in kilometers")
-    elevation_gain_m: float = Field(..., description="Total elevation gain in meters")
+    """Single optimal route response."""
+    distance_km: float = Field(..., description="Route distance in kilometers")
+    elevation_gain_m: float = Field(..., description="Elevation gain in meters")
     node_count: int = Field(..., description="Number of nodes in the route")
-    map_url: str = Field(..., description="URL to the generated map HTML file")
     wind_metrics: WindMetrics | None = Field(
-        None, description="Wind condition metrics if wind_weight > 0"
+        None, description="Wind metrics if wind_weight > 0"
     )
+    map_url: str = Field(..., description="URL to the generated map HTML file")

@@ -81,13 +81,16 @@ def edge_cost(
     edge_bearing_deg: float | None = None,
     is_park_path: bool = False,
     allow_parks: bool = True,
+    is_against_traffic: bool = False,
+    max_against_traffic_blocks: int = 0,
 ) -> float:
     """
-    Calculate edge cost with elevation, wind penalties, and park path control.
+    Calculate edge cost with elevation, wind penalties, park path control, and against-traffic penalty.
 
-    Fórmula: length * (1 + elevation_weight * grade_penalty) * wind_penalty * park_multiplier
-    Grade penalty is non-linear: quadratic scaling for grades > 3% to amplify cost of steep sections.
+    Fórmula: length * (1 + elevation_weight * grade_penalty) * wind_penalty * park_multiplier * against_traffic_multiplier
+    Grade penalty is non-linear: grade ** 1.5, so steep grades cost disproportionately more than gentle ones.
     Park paths receive incentive discount when allowed (0.5x) or penalty when blocked (10.0x).
+    Against-traffic edges receive high penalty (6.0x) or infinite cost if not allowed.
 
     Args:
         length: Edge length in meters
@@ -98,7 +101,18 @@ def edge_cost(
         edge_bearing_deg: Edge bearing in degrees (0-360), required if wind_data provided
         is_park_path: Whether edge is a park/plaza internal path
         allow_parks: Whether to allow traversing park paths (True) or penalize (False)
+        is_against_traffic: Whether edge is marked as against-traffic (oneway reverse)
+        max_against_traffic_blocks: Max blocks (segments) to allow against-traffic (0-3, 0=disabled)
     """
+    # Apply against-traffic multiplier
+    if is_against_traffic:
+        if max_against_traffic_blocks == 0:
+            return float("inf")
+        else:
+            against_traffic_multiplier = 6.0
+    else:
+        against_traffic_multiplier = 1.0
+
     # Apply park path multiplier before other calculations
     park_multiplier = 1.0
     if is_park_path:
@@ -106,12 +120,14 @@ def edge_cost(
 
     uphill_grade = min(max(grade, 0.0), MAX_GRADE)
 
-    # Non-linear penalty for steep grades (>3%) to force visible deviations
-    if uphill_grade > 0.03:
-        steep_portion = uphill_grade - 0.03
-        uphill_grade = 0.03 + steep_portion ** 2
+    # Power-law penalty (grade ** 1.5): amplifies steep grades relative to gentle
+    # ones. NOTE: squaring a fraction < 1 (the old approach) SHRINKS it, which
+    # made steep and gentle grades cost almost the same regardless of
+    # elevation_weight. A power > 1 applied consistently across the whole
+    # domain instead widens the gap between steep and gentle grades.
+    grade_penalty = uphill_grade ** 1.5
 
-    base_cost = length * (1.0 + elevation_weight * uphill_grade) * park_multiplier
+    base_cost = length * (1.0 + elevation_weight * grade_penalty) * park_multiplier * against_traffic_multiplier
 
     if wind_data and wind_weight > 0 and edge_bearing_deg is not None:
         wind_penalty = _calculate_wind_penalty(
