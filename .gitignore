@@ -41,3 +41,14 @@ example
 # generated native folders
 /ios
 /android
+
+cat <<EOF > .gitignore
+node_modules/
+.expo/
+dist/
+build/
+*.log
+.DS_Store
+.env
+.env.local
+EOF

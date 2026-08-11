@@ -1,62 +1,128 @@
-import * as Device from 'expo-device';
+import * as Location from 'expo-location';
+import { useState } from 'react';
 import { Platform, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { WebView } from 'react-native-webview';
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
+import { FilterModal, RouteFilters } from '@/components/filter-modal';
+import { RouteSummarySheet } from '@/components/route-summary-sheet';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { TopBar } from '@/components/top-bar';
+import { Spacing } from '@/constants/theme';
+import { getRoute, resolveMapUrl, RouteResponse } from '@/services/api';
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
-  }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
-  return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
-}
+const DEFAULT_FILTERS: RouteFilters = {
+  elevationWeight: 5.0,
+  windWeight: 0.0,
+  allowParks: true,
+  maxAgainstTrafficBlocks: 0,
+};
 
-export default function HomeScreen() {
+export default function MapScreen() {
+  const [originText, setOriginText] = useState('');
+  const [destText, setDestText] = useState('');
+  const [originCoords, setOriginCoords] = useState<{ lat: number; lon: number } | null>(null);
+  const [filters, setFilters] = useState<RouteFilters>(DEFAULT_FILTERS);
+  const [filtersVisible, setFiltersVisible] = useState(false);
+  const [route, setRoute] = useState<RouteResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleUseCurrentLocation() {
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') {
+      setError('Permiso de ubicación denegado');
+      return;
+    }
+    const position = await Location.getCurrentPositionAsync({});
+    setOriginCoords({ lat: position.coords.latitude, lon: position.coords.longitude });
+    setOriginText('Mi ubicación actual');
+  }
+
+  async function handleSubmit() {
+    if (!originText && !originCoords) {
+      setError('Ingresá un origen');
+      return;
+    }
+    if (!destText) {
+      setError('Ingresá un destino');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    try {
+      const useOriginCoords = originCoords && originText === 'Mi ubicación actual';
+      const result = await getRoute({
+        originPlace: useOriginCoords ? undefined : originText,
+        originLat: useOriginCoords ? originCoords.lat : undefined,
+        originLon: useOriginCoords ? originCoords.lon : undefined,
+        destPlace: destText,
+        elevationWeight: filters.elevationWeight,
+        windWeight: filters.windWeight,
+        allowParks: filters.allowParks,
+        maxAgainstTrafficBlocks: filters.maxAgainstTrafficBlocks,
+      });
+      setRoute(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo calcular la ruta');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleStartRoute() {
+    // Turn-by-turn navigation is not implemented yet; the map already shows the computed route.
+  }
+
   return (
     <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
+      {route ? (
+        <WebView source={{ uri: resolveMapUrl(route.map_url) }} style={StyleSheet.absoluteFill} />
+      ) : (
+        <ThemedView type="backgroundElement" style={StyleSheet.absoluteFill}>
+          <ThemedView style={styles.idleState}>
+            <ThemedText type="subtitle" style={styles.idleTitle}>
+              enbici
+            </ThemedText>
+            <ThemedText themeColor="textSecondary" style={styles.idleText}>
+              Ingresá un origen y un destino para calcular tu ruta en bici.
+            </ThemedText>
+          </ThemedView>
+        </ThemedView>
+      )}
+
+      <SafeAreaView style={styles.overlay} pointerEvents="box-none">
+        <ThemedView style={styles.topBarWrapper}>
+          <TopBar
+            originText={originText}
+            destText={destText}
+            onOriginChange={setOriginText}
+            onDestChange={setDestText}
+            onUseCurrentLocation={handleUseCurrentLocation}
+            onOpenFilters={() => setFiltersVisible(true)}
+            onSubmit={handleSubmit}
+            loading={loading}
+          />
+          {error && (
+            <ThemedText type="small" themeColor="textSecondary" style={styles.errorText}>
+              {error}
+            </ThemedText>
+          )}
         </ThemedView>
 
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
-
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
-          />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
-
-        {Platform.OS === 'web' && <WebBadge />}
+        {route && (
+          <RouteSummarySheet route={route} onStartRoute={handleStartRoute} />
+        )}
       </SafeAreaView>
+
+      <FilterModal
+        visible={filtersVisible}
+        filters={filters}
+        onChange={setFilters}
+        onClose={() => setFiltersVisible(false)}
+      />
     </ThemedView>
   );
 }
@@ -64,35 +130,33 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
   },
-  safeArea: {
+  overlay: {
     flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
+    justifyContent: 'space-between',
+    backgroundColor: 'transparent',
   },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
+  topBarWrapper: {
+    marginHorizontal: Spacing.three,
+    marginTop: Platform.select({ android: Spacing.three, default: 0 }),
+    backgroundColor: 'transparent',
   },
-  title: {
+  errorText: {
+    marginTop: Spacing.one,
     textAlign: 'center',
   },
-  code: {
-    textTransform: 'uppercase',
+  idleState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.two,
+    paddingHorizontal: Spacing.five,
+    backgroundColor: 'transparent',
   },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
+  idleTitle: {
+    textAlign: 'center',
+  },
+  idleText: {
+    textAlign: 'center',
   },
 });
