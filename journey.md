@@ -30,6 +30,9 @@ Documentos de referencia del proyecto:
 | **Rutas alternativas / multi-ruta** | ❌ Removida | Se implementó y luego se revirtió a arquitectura de ruta única (2026-08-08) |
 | **Against-traffic tolerance** | ✅ | Funcional pero raramente usado (red principal ya es óptima en la mayoría de rutas) |
 | **Park paths (parques/plazas)** | ✅ | Incentivo funcional; topología rara vez ofrece shortcuts reales |
+| **App móvil — PoC "Client-Side Map-First en React Native"** | ✅ | Port a Android exitoso (APK nativo vía EAS Build, corriendo en dispositivo físico). No requirió modificar el backend. |
+
+> **Nota (app móvil):** el código de la app vive en un proyecto separado: `enbici_port_android_beta` (ver su `journey_app_android.md`). Consume `GET /route` tal cual. El backend debe correr **obligatoriamente con `host="0.0.0.0"`** para ser accesible desde el celular.
 
 ---
 

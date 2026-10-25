@@ -116,7 +116,7 @@ def edge_cost(
     # Apply park path multiplier before other calculations
     park_multiplier = 1.0
     if is_park_path:
-        park_multiplier = 0.5 if allow_parks else 10.0
+        park_multiplier = 0.2 if allow_parks else 10.0
 
     uphill_grade = min(max(grade, 0.0), MAX_GRADE)
 
@@ -125,7 +125,7 @@ def edge_cost(
     # made steep and gentle grades cost almost the same regardless of
     # elevation_weight. A power > 1 applied consistently across the whole
     # domain instead widens the gap between steep and gentle grades.
-    grade_penalty = uphill_grade ** 1.5
+    grade_penalty = (uphill_grade * 12.0) ** 2.0
 
     base_cost = length * (1.0 + elevation_weight * grade_penalty) * park_multiplier * against_traffic_multiplier
 

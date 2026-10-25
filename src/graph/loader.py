@@ -66,6 +66,63 @@ def _mark_park_paths(G: nx.MultiDiGraph) -> None:
         data["is_park_path"] = is_park_path
 
 
+MIN_PARK_CLUSTER_NODES = 3
+
+
+def _inject_park_supernodes(G: nx.MultiDiGraph) -> None:
+    """Add a virtual centroid super-node for each park/plaza path cluster.
+
+    Groups edges already marked ``is_park_path`` (footway/path/pedestrian,
+    see ``_mark_park_paths``) into connected components — each component is
+    treated as one park/plaza. A virtual node is added at the component's
+    centroid and connected bidirectionally to every perimeter node in it,
+    letting routing "cut through" the park instead of only tracing its
+    internal paths edge by edge.
+
+    Idempotent: skips entirely if supernodes were already injected (detected
+    via node id prefix), so calling it again on an already-processed graph
+    is a no-op.
+    """
+    if any(str(n).startswith("park_supernode_") for n in G.nodes):
+        logger.info("Park supernodes already present; skipping injection.")
+        return
+
+    park_subgraph = nx.Graph()
+    park_subgraph.add_edges_from(
+        (u, v)
+        for u, v, data in G.edges(data=True)
+        if data.get("is_park_path")
+    )
+
+    supernode_count = 0
+    for component in nx.connected_components(park_subgraph):
+        if len(component) < MIN_PARK_CLUSTER_NODES:
+            continue
+
+        centroid_lat = sum(G.nodes[n]["y"] for n in component) / len(component)
+        centroid_lon = sum(G.nodes[n]["x"] for n in component) / len(component)
+
+        supernode_id = f"park_supernode_{supernode_count}"
+        supernode_count += 1
+        G.add_node(supernode_id, y=centroid_lat, x=centroid_lon, elevation=0.0)
+
+        for perimeter_node in component:
+            perim_lat = G.nodes[perimeter_node]["y"]
+            perim_lon = G.nodes[perimeter_node]["x"]
+            length = ox.distance.great_circle(perim_lat, perim_lon, centroid_lat, centroid_lon)
+
+            G.add_edge(
+                perimeter_node, supernode_id,
+                length=length, is_park_path=True, grade=0.0,
+            )
+            G.add_edge(
+                supernode_id, perimeter_node,
+                length=length, is_park_path=True, grade=0.0,
+            )
+
+    logger.info("Injected %d park/plaza super-nodes.", supernode_count)
+
+
 def _add_against_traffic_edges(G: nx.MultiDiGraph) -> None:
     """Add reverse edges for oneway streets, tagged as against-traffic.
 
@@ -138,6 +195,7 @@ def load_montevideo_graph() -> nx.DiGraph:
         _save_to_cache(G)
 
     _mark_park_paths(G)
+    _inject_park_supernodes(G)
     _add_against_traffic_edges(G)
 
     digraph = ox.convert.to_digraph(G)
