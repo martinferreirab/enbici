@@ -9,7 +9,12 @@ from pathlib import Path
 import networkx as nx
 import osmnx as ox
 
-from src.graph.elevation import enrich_graph_with_elevation, graph_has_elevation
+from src.graph.elevation import (
+    MAX_GRADE,
+    compute_edge_grades,
+    enrich_graph_with_elevation,
+    graph_has_elevation,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +123,11 @@ def load_montevideo_graph() -> nx.DiGraph:
     if GRAPH_PICKLE_PATH.exists():
         with GRAPH_PICKLE_PATH.open("rb") as f:
             digraph = pickle.load(f)
+        if digraph.graph.get("grade_max") != MAX_GRADE:
+            logger.info("Recalculating cached grades with a %.0f%% cap", MAX_GRADE * 100)
+            compute_edge_grades(digraph)
+            digraph.graph["grade_max"] = MAX_GRADE
+            _save_pickle_atomic(digraph)
         logger.info(
             "✓ Montevideo graph loaded from binary cache: %d nodes, %d edges",
             digraph.number_of_nodes(),
@@ -131,7 +141,10 @@ def load_montevideo_graph() -> nx.DiGraph:
         if not graph_has_elevation(G):
             logger.warning("Cache missing elevation/grade data. Re-enrichment required.")
             enrich_graph_with_elevation(G)
-            _save_to_cache(G)
+        else:
+            # Recalculate from node elevations so old grade caps do not persist.
+            compute_edge_grades(G)
+        _save_to_cache(G)
     else:
         G = _download_graph()
         enrich_graph_with_elevation(G)
@@ -141,6 +154,7 @@ def load_montevideo_graph() -> nx.DiGraph:
     _add_against_traffic_edges(G)
 
     digraph = ox.convert.to_digraph(G)
+    digraph.graph["grade_max"] = MAX_GRADE
     logger.info(
         "✓ Montevideo graph built: %d nodes, %d edges",
         digraph.number_of_nodes(),

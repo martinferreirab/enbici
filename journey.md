@@ -136,24 +136,26 @@ Respuesta (`RouteResponse`, estructura plana, sin alternativas):
   2. Fetch real vía Open-Meteo Elevation API (`https://api.open-meteo.com/v1/elevation`, POST, **máx. 100 coordenadas por request** — límite duro del API, no 1000). Rate-limitea (429) después de ~6 batches; el fetch es **resumible**: cada batch exitoso se persiste en `data/elevation_samples_cache.json`, y re-correr el script retoma solo lo pendiente sin perder progreso ni duplicar requests.
   3. Interpolación IDW (`scipy.spatial.cKDTree`, k=8 vecinos, peso=`1/distancia²`) para los ~21,700 nodos restantes.
   4. Recalcula `grade` por arista y guarda `data/montevideo.graphml`.
-- Rango actual: **0-79m**. Atributo `elevation` en nodos, `grade` en aristas (acotado a ±25%, `MAX_GRADE=0.25`).
+- Rango actual: **0-79m**. Atributo `elevation` en nodos, `grade` en aristas (acotado a ±45%, `MAX_GRADE=0.45`).
 - **Limitación de resolución conocida**: calles paralelas a <100-200m suelen interpolar a elevaciones casi idénticas, por lo que `elevation_weight` alto no siempre produce una ruta visiblemente distinta (el efecto se nota más en `elevation_gain_m` que en el path elegido). No es un bug de ruteo — es un límite de resolución de la malla de muestreo.
 
 ### Función de costo (`src/routing/cost.py → edge_cost()`)
 
 ```
 uphill_grade = clip(grade, 0, MAX_GRADE)
-grade_penalty = uphill_grade ** 1.5          # ley de potencia — amplifica pendientes pronunciadas
-base_cost = length * (1 + elevation_weight * grade_penalty) * park_multiplier * against_traffic_multiplier
+elevation_ratio = 1 + elevation_weight * uphill_grade * 1.5
+base_cost = length * elevation_ratio * park_multiplier * against_traffic_multiplier
 cost = base_cost * wind_penalty              # si hay wind_data
 wind_penalty = 1 + (wind_weight/10) * wind_speed * headwind_factor
 headwind_factor = (1 + cos(ángulo_viento_rumbo)) / 2   # 0=tailwind, 1=headwind
 ```
 
 - Solo penaliza pendientes **ascendentes**; downhill no cuesta extra.
-- **`grade ** 1.5`** (no cuadrático-con-umbral): una versión anterior usaba `0.03 + (grade-0.03)²`, que al elevar al cuadrado una fracción <1 **reducía** el efecto de pendientes pronunciadas en vez de amplificarlo — bug corregido 2026-08-10.
+- Las bajadas se descuentan individualmente: menor a 10% cuesta 1.0x; de 10% a 25% inclusive cuesta 0.75x; mayor a 25% cuesta 0.5x. No reciben un recargo por continuidad.
+- La penalizacion de elevacion es lineal. Con peso 5, una subida de 5% hace que un tramo cueste 1.375 veces su longitud antes de aplicar los demas factores.
+- Si `elevation_ratio > 1.75` en dos tramos consecutivos, desde el segundo se multiplica el costo por `1.10`. Con peso 10, un tramo de 5% tiene ratio exactamente 1.75 y no activa la regla; una pendiente mayor sí la supera. Se usa un grafo de estados en Dijkstra para que el costo dependa correctamente de si el tramo anterior supero el umbral.
 - `park_multiplier`: 0.5x si `is_park_path` y `allow_parks=True` (incentivo); 10x si `allow_parks=False` (penalización).
-- `against_traffic_multiplier`: `inf` si `max_against_traffic_blocks=0`; 6.0x si >0.
+- `against_traffic_multiplier`: `inf` si `max_against_traffic_blocks=0`; 1.8x si >0.
 - Bearing de arista vía `_calculate_bearing(lat1, lon1, lat2, lon2)`.
 - Algoritmo: Dijkstra (`networkx.shortest_path`) con función de peso dinámica.
 

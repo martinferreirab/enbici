@@ -10,7 +10,7 @@ No github unless asked to
 ## 2. Fast Route Cost Function
 - When calculating path weights, write vector-friendly or pure-Python lean helper functions to keep A*/Dijkstra evaluations fast.
 - Formula baseline: `weight = length * (1 + elevation_weight * max(0, grade))`.
-- Keep elevation grade capped at realistic values (e.g., max 0.25 / 25%) to avoid math artifacts from noisy elevation datasets.
+- Keep elevation grade capped to avoid math artifacts from noisy elevation datasets; this project currently uses a 0.45 / 45% cap.
 
 ## 3. Python 3.12 & Dependency Management
 - ALWAYS use `uv` for dependency management (`uv add <package>`, `uv venv`, `uv run`).
