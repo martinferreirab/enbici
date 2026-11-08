@@ -238,7 +238,7 @@ headwind_factor = (1 + cos(ángulo_viento_rumbo)) / 2   # 0=tailwind, 1=headwind
 3. **El thread de Streamlit no puede tocar `st.session_state`** (no hay script-run context); usa un `threading.Event` guardado en session_state para detenerlo. Cambiar de ruta detiene la simulación.
 4. **Telemetría con celular quieto**: `speed_ms` ronda 0–1 m/s por ruido de GPS; no interpretar como movimiento.
 5. `data/*.csv` y `output/*.html` son generados; se re-escriben al correr `consulta_prueba.py` / el servidor.
-6. Hay dos copias del cliente móvil: el proyecto real y activo es `../enbici_port_android_beta` (repo git propio); `enbici/enbici_port_android_beta/` es un snapshot dentro de este repo. Se sincroniza copiando fuentes (sin `node_modules`, sin API key).
+6. El cliente móvil vive **solo** en `../enbici_port_android_beta` (repo git propio, sin remoto aún). Se eliminó el snapshot que había en `enbici/enbici_port_android_beta/` para no duplicar código ni arriesgar la API key.
 
 ### Pendiente / ideas
 - Rate limiting, HTTPS, borrar viajes (ya estaban pendientes).
