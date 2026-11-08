@@ -24,6 +24,10 @@ from src.graph.elevation import MAX_GRADE, compute_edge_grades  # noqa: E402
 from src.routing.cost import (  # noqa: E402
     CONSECUTIVE_CLIMB_RATIO_THRESHOLD,
     ELEVATION_SENSITIVITY,
+    MODERATE_DOWNHILL_GRADE_THRESHOLD,
+    MODERATE_DOWNHILL_MULTIPLIER,
+    STEEP_DOWNHILL_GRADE_THRESHOLD,
+    STEEP_DOWNHILL_MULTIPLIER,
     downhill_cost_multiplier,
     edge_cost,
     elevation_cost_ratio,
@@ -49,12 +53,12 @@ def main() -> int:
     downhill_cost = edge_cost(100.0, -0.10, 10.0)
     print(f"  downhill grade=-0.10, w=10.0 -> {downhill_cost:.2f} (expected 75.00)")
     assert downhill_cost == 75.0, "A 10% downhill edge must cost 75% of its length"
-    assert downhill_cost_multiplier(-0.0999) == 1.0
-    assert downhill_cost_multiplier(-0.10) == 0.75
-    assert downhill_cost_multiplier(-0.25) == 0.75
-    assert downhill_cost_multiplier(-0.2501) == 0.50
-    assert edge_cost(100.0, -0.10, 10.0) == 75.0
-    assert edge_cost(100.0, -0.30, 10.0) == 50.0
+    assert downhill_cost_multiplier(-(MODERATE_DOWNHILL_GRADE_THRESHOLD - 0.0001)) == 1.0
+    assert downhill_cost_multiplier(-MODERATE_DOWNHILL_GRADE_THRESHOLD) == MODERATE_DOWNHILL_MULTIPLIER
+    assert downhill_cost_multiplier(-STEEP_DOWNHILL_GRADE_THRESHOLD) == MODERATE_DOWNHILL_MULTIPLIER
+    assert downhill_cost_multiplier(-(STEEP_DOWNHILL_GRADE_THRESHOLD + 0.0001)) == STEEP_DOWNHILL_MULTIPLIER
+    assert edge_cost(100.0, -MODERATE_DOWNHILL_GRADE_THRESHOLD, 10.0) == 75.0
+    assert edge_cost(100.0, -(STEEP_DOWNHILL_GRADE_THRESHOLD + 0.05), 10.0) == 50.0
     expected_linear_cost = 100.0 * (1 + 5.0 * 0.05 * ELEVATION_SENSITIVITY)
     assert edge_cost(100.0, 0.05, 5.0) == expected_linear_cost, (
         "Uphill cost must use the configured linear sensitivity"

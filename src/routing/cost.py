@@ -19,6 +19,10 @@ MODERATE_DOWNHILL_GRADE_THRESHOLD = 0.10
 STEEP_DOWNHILL_GRADE_THRESHOLD = 0.25
 MODERATE_DOWNHILL_MULTIPLIER = 0.75
 STEEP_DOWNHILL_MULTIPLIER = 0.50
+MODERATE_DOWNHILL_GRADE_THRESHOLD = 0.10
+STEEP_DOWNHILL_GRADE_THRESHOLD = 0.25
+MODERATE_DOWNHILL_MULTIPLIER = 0.75
+STEEP_DOWNHILL_MULTIPLIER = 0.50
 
 
 @dataclass(frozen=True)
@@ -97,6 +101,16 @@ def downhill_cost_multiplier(grade: float) -> float:
     return 1.0
 
 
+def downhill_cost_multiplier(grade: float) -> float:
+    """Return a per-edge discount based on the magnitude of a downhill grade."""
+    downhill_grade = max(-grade, 0.0)
+    if downhill_grade > STEEP_DOWNHILL_GRADE_THRESHOLD:
+        return STEEP_DOWNHILL_MULTIPLIER
+    if downhill_grade >= MODERATE_DOWNHILL_GRADE_THRESHOLD:
+        return MODERATE_DOWNHILL_MULTIPLIER
+    return 1.0
+
+
 def edge_cost(
     length: float,
     grade: float,
@@ -146,7 +160,10 @@ def edge_cost(
     if grade < 0:
         elevation_multiplier = downhill_cost_multiplier(grade)
     else:
-        elevation_multiplier = elevation_cost_ratio(grade, elevation_weight)
+        if grade < 0:
+            elevation_multiplier = downhill_cost_multiplier(grade)
+        else:
+            elevation_multiplier = elevation_cost_ratio(grade, elevation_weight)
     base_cost = length * elevation_multiplier * park_multiplier * against_traffic_multiplier
 
     if wind_data and wind_weight > 0 and edge_bearing_deg is not None:

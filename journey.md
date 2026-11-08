@@ -150,7 +150,7 @@ wind_penalty = 1 + (wind_weight/10) * wind_speed * headwind_factor
 headwind_factor = (1 + cos(ángulo_viento_rumbo)) / 2   # 0=tailwind, 1=headwind
 ```
 
-- Solo penaliza pendientes **ascendentes**; downhill no cuesta extra.
+- Las pendientes **ascendentes** reciben penalizacion lineal por `elevation_weight`; las bajadas reciben los descuentos individuales descritos a continuacion.
 - Las bajadas se descuentan individualmente: menor a 10% cuesta 1.0x; de 10% a 25% inclusive cuesta 0.75x; mayor a 25% cuesta 0.5x. No reciben un recargo por continuidad.
 - La penalizacion de elevacion es lineal. Con peso 5, una subida de 5% hace que un tramo cueste 1.375 veces su longitud antes de aplicar los demas factores.
 - Si `elevation_ratio > 1.75` en dos tramos consecutivos, desde el segundo se multiplica el costo por `1.10`. Con peso 10, un tramo de 5% tiene ratio exactamente 1.75 y no activa la regla; una pendiente mayor sí la supera. Se usa un grafo de estados en Dijkstra para que el costo dependa correctamente de si el tramo anterior supero el umbral.
