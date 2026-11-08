@@ -5,13 +5,22 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { RouteResponse } from "../types/route";
 import { cardShadow } from "./shadow";
 
-const SHEET_HEIGHT = 260;
+const SHEET_HEIGHT = 320;
 const PEEK = 90; // visible height when collapsed
 
 const CARDINALS = ["N", "NE", "E", "SE", "S", "SO", "O", "NO"];
 const cardinal = (deg: number) => CARDINALS[Math.round(deg / 45) % 8];
 
-export function BottomSheet({ route }: { route: RouteResponse }) {
+interface Props {
+  route: RouteResponse;
+  saving: boolean;
+  tracking: boolean;
+  onSave: () => void;
+  onStart: () => void;
+  onStop: () => void;
+}
+
+export function BottomSheet({ route, saving, tracking, onSave, onStart, onStop }: Props) {
   const { bottom } = useSafeAreaInsets();
   const collapsedY = SHEET_HEIGHT - PEEK;
   const y = useSharedValue(0);
@@ -50,8 +59,11 @@ export function BottomSheet({ route }: { route: RouteResponse }) {
             Viento: {w.wind_speed_ms.toFixed(1)} m/s ({(w.wind_speed_ms * 3.6).toFixed(1)} km/h) del {cardinal(w.wind_direction_deg)}
           </Text>
         )}
-        <Pressable style={styles.cta} onPress={() => {}}>
-          <Text style={styles.ctaText}>Iniciar Ruta</Text>
+        <Pressable style={[styles.cta, tracking && styles.ctaStop]} onPress={tracking ? onStop : onStart}>
+          <Text style={styles.ctaText}>{tracking ? "Detener Ruta" : "Iniciar Ruta"}</Text>
+        </Pressable>
+        <Pressable style={[styles.save, saving && styles.disabled]} disabled={saving} onPress={onSave}>
+          <Text style={styles.saveText}>{saving ? "Guardando…" : "Guardar Ruta"}</Text>
         </Pressable>
       </Animated.View>
     </View>
@@ -77,5 +89,9 @@ const styles = StyleSheet.create({
   label: { fontSize: 12, color: "#666" },
   wind: { textAlign: "center", marginTop: 14, color: "#333" },
   cta: { backgroundColor: "#1b7f4b", borderRadius: 12, paddingVertical: 12, alignItems: "center", marginTop: 16 },
+  ctaStop: { backgroundColor: "#b3261e" },
+  save: { borderWidth: 1.5, borderColor: "#1b7f4b", borderRadius: 12, paddingVertical: 11, alignItems: "center", marginTop: 10 },
+  saveText: { color: "#1b7f4b", fontWeight: "700", fontSize: 16 },
+  disabled: { opacity: 0.5 },
   ctaText: { color: "#fff", fontWeight: "700", fontSize: 16 },
 });

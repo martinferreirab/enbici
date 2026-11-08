@@ -13,7 +13,7 @@ from src.auth.security import (
     verify_password,
 )
 from src.db.database import get_db
-from src.db.models import JourneyLog, User
+from src.db.models import JourneyLog, JourneyTelemetry, User
 
 router = APIRouter(tags=["users"])
 
@@ -45,6 +45,14 @@ class JourneyOut(JourneyCreate):
 
     id: int
     timestamp: datetime
+    is_started: bool
+    is_completed: bool
+
+
+class TelemetryIn(BaseModel):
+    lat: float = Field(..., ge=-90, le=90)
+    lon: float = Field(..., ge=-180, le=180)
+    speed_ms: float | None = Field(default=None, ge=0)
 
 
 @router.post("/register", response_model=TokenResponse, status_code=201)
@@ -87,3 +95,47 @@ def list_routes(
 ) -> list[JourneyLog]:
     stmt = select(JourneyLog).where(JourneyLog.user_id == user.id).order_by(JourneyLog.timestamp.desc())
     return list(db.scalars(stmt))
+
+
+def _own_journey(db: Session, user: User, journey_id: int) -> JourneyLog:
+    journey = db.get(JourneyLog, journey_id)
+    if journey is None or journey.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Journey not found")
+    return journey
+
+
+@router.post("/users/me/routes/{journey_id}/start", response_model=JourneyOut)
+def start_route(
+    journey_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> JourneyLog:
+    journey = _own_journey(db, user, journey_id)
+    journey.is_started = True
+    db.commit()
+    return journey
+
+
+@router.post("/users/me/routes/{journey_id}/telemetry", status_code=201)
+def add_telemetry(
+    journey_id: int,
+    body: TelemetryIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    journey = _own_journey(db, user, journey_id)
+    db.add(JourneyTelemetry(journey_id=journey.id, **body.model_dump()))
+    db.commit()
+    return {"status": "ok"}
+
+
+@router.post("/users/me/routes/{journey_id}/finish", response_model=JourneyOut)
+def finish_route(
+    journey_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> JourneyLog:
+    journey = _own_journey(db, user, journey_id)
+    journey.is_completed = True
+    db.commit()
+    return journey

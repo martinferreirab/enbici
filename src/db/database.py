@@ -21,6 +21,18 @@ def init_db() -> None:
 
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(engine)
+    _add_missing_journey_columns()
+
+
+def _add_missing_journey_columns() -> None:
+    """create_all no altera tablas existentes: agrega las columnas de estado de viaje a un .db viejo."""
+    from sqlalchemy import inspect, text
+
+    existing = {c["name"] for c in inspect(engine).get_columns("journey_logs")}
+    with engine.begin() as conn:
+        for col in ("is_started", "is_completed"):
+            if col not in existing:
+                conn.execute(text(f"ALTER TABLE journey_logs ADD COLUMN {col} BOOLEAN NOT NULL DEFAULT 0"))
 
 
 def get_db():

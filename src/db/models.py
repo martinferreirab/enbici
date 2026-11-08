@@ -35,5 +35,18 @@ class JourneyLog(Base):
     allow_parks: Mapped[bool] = mapped_column(Boolean)
     max_against_traffic_blocks: Mapped[int] = mapped_column(Integer)
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    is_started: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    is_completed: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
     user: Mapped[User] = relationship(back_populates="journeys")
+
+
+class JourneyTelemetry(Base):
+    __tablename__ = "journey_telemetry"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    journey_id: Mapped[int] = mapped_column(ForeignKey("journey_logs.id"), index=True)
+    lat: Mapped[float] = mapped_column(Float)
+    lon: Mapped[float] = mapped_column(Float)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    speed_ms: Mapped[float | None] = mapped_column(Float, nullable=True)

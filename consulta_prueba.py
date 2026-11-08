@@ -11,13 +11,28 @@ query = """
     JOIN users u ON j.user_id = u.id
 """
 
+# Puntos GPS de cada viaje, en orden cronológico
+telemetry_query = """
+    SELECT t.id, t.journey_id, u.username, j.origin_place, j.dest_place,
+           t.timestamp, t.lat, t.lon, t.speed_ms
+    FROM journey_telemetry t
+    JOIN journey_logs j ON t.journey_id = j.id
+    JOIN users u ON j.user_id = u.id
+    ORDER BY t.journey_id, t.timestamp
+"""
+
 df = pd.read_sql_query(query, conn)
+df_telemetry = pd.read_sql_query(telemetry_query, conn)
 conn.close()
 
 # Mostrar en consola
-print("--- HISTORIAL DE VIAJES (TELEMETRÍA) ---")
+print("--- HISTORIAL DE VIAJES ---")
 print(df)
 
-# Guardar los datos en un archivo CSV en el directorio local
+print("\n--- TELEMETRÍA (UBICACIÓN DEL USUARIO EN EL TIEMPO) ---")
+print(df_telemetry)
+
+# Guardar los datos en archivos CSV en el directorio local
 df.to_csv("data/historial_viajes.csv", index=False)
-print("\n Archivo CSV guardado exitosamente en: data/historial_viajes.csv")
+df_telemetry.to_csv("data/telemetria_viajes.csv", index=False)
+print("\n Archivos CSV guardados en: data/historial_viajes.csv y data/telemetria_viajes.csv")

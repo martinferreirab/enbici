@@ -4,7 +4,7 @@ from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from src.api.schemas import RouteResponse, WindMetrics
+from src.api.schemas import Coordinate, RouteResponse, WindMetrics
 from src.api.users import router as users_router
 from src.api.weather import fetch_wind_data
 from src.db.database import init_db
@@ -190,6 +190,9 @@ async def get_route(
             node_count=metrics.node_count,
             wind_metrics=wind_metrics,
             map_url="/static/ruta_montevideo.html",
+            route_coordinates=[
+                Coordinate(lat=G.nodes[n]["y"], lon=G.nodes[n]["x"]) for n in path
+            ],
         )
 
     except HTTPException:

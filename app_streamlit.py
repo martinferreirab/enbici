@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 
 import folium
 import plotly.graph_objects as go
@@ -22,6 +23,10 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 API_URL = os.getenv("ENBICI_API_URL", "http://localhost:8000")
+
+# Plaza Independencia (Montevideo): fixed position used to mock GPS telemetry
+MOCK_LAT, MOCK_LON = -34.9060, -56.1996
+TELEMETRY_INTERVAL_S = 15
 
 # Page config
 st.set_page_config(
@@ -53,6 +58,32 @@ def _get_wind_cardinal(degrees: float) -> str:
     return directions[idx]
 
 
+def _mock_telemetry_loop(stop: threading.Event, token: str, journey_id: int) -> None:
+    """Background thread: POST the fixed mock position every 15 s until `stop` is set.
+
+    Must not touch st.session_state (no script-run context in this thread).
+    """
+    headers = {"Authorization": f"Bearer {token}"}
+    while not stop.is_set():
+        try:
+            requests.post(
+                f"{API_URL}/users/me/routes/{journey_id}/telemetry",
+                json={"lat": MOCK_LAT, "lon": MOCK_LON, "speed_ms": 0.0},
+                headers=headers,
+                timeout=10,
+            )
+        except requests.RequestException:
+            logger.warning("Mock telemetry POST failed", exc_info=True)
+        stop.wait(TELEMETRY_INTERVAL_S)
+
+
+def _stop_mock_telemetry() -> None:
+    stop = st.session_state.get("mock_stop")
+    if stop:
+        stop.set()
+    st.session_state.mock_stop = None
+
+
 # Initialize session state for coordinates and calculated route
 if "origin_coords" not in st.session_state:
     st.session_state.origin_coords = None
@@ -62,6 +93,10 @@ if "calculated_route" not in st.session_state:
     st.session_state.calculated_route = None
 if "last_route_key" not in st.session_state:
     st.session_state.last_route_key = None
+if "saved_journey_id" not in st.session_state:
+    st.session_state.saved_journey_id = None
+if "mock_stop" not in st.session_state:
+    st.session_state.mock_stop = None
 if "token" not in st.session_state:
     st.session_state.token = None
 if "username" not in st.session_state:
@@ -277,6 +312,8 @@ if calculate_button:
                         "map_key": f"map_{origin_lat:.4f}_{origin_lon:.4f}_{dest_lat:.4f}_{dest_lon:.4f}_{elevation_weight}_{wind_weight}_{allow_parks}_{max_against_traffic_blocks}",
                     }
 
+                    _stop_mock_telemetry()
+                    st.session_state.saved_journey_id = None
                     st.success("✅ Ruta calculada exitosamente")
                 else:
                     st.error("❌ No se encontró ruta entre los puntos")
@@ -395,6 +432,7 @@ if st.session_state.calculated_route:
                 timeout=10,
             )
             if resp.ok:
+                st.session_state.saved_journey_id = resp.json()["id"]
                 st.success("✅ Ruta guardada")
             elif resp.status_code == 401:
                 st.session_state.token = None
@@ -404,6 +442,33 @@ if st.session_state.calculated_route:
                 st.error(f"❌ No se pudo guardar: {_api_error(resp)}")
         except requests.RequestException as e:
             st.error(f"❌ No se pudo conectar con el servidor: {e}")
+
+    # Mock journey start (only once the journey has been saved)
+    if st.session_state.saved_journey_id and logged_in:
+        journey_id = st.session_state.saved_journey_id
+        mock_running = st.session_state.mock_stop is not None and not st.session_state.mock_stop.is_set()
+        if mock_running:
+            st.info(f"📡 Simulando telemetría en Plaza Independencia cada {TELEMETRY_INTERVAL_S}s (viaje #{journey_id})")
+            if st.button("⏹️ Detener Simulación"):
+                _stop_mock_telemetry()
+                st.rerun()
+        elif st.button("▶️ Simular Inicio de Ruta"):
+            headers = {"Authorization": f"Bearer {st.session_state.token}"}
+            try:
+                resp = requests.post(f"{API_URL}/users/me/routes/{journey_id}/start", headers=headers, timeout=10)
+                if resp.ok:
+                    stop = threading.Event()
+                    threading.Thread(
+                        target=_mock_telemetry_loop,
+                        args=(stop, st.session_state.token, journey_id),
+                        daemon=True,
+                    ).start()
+                    st.session_state.mock_stop = stop
+                    st.rerun()
+                else:
+                    st.error(f"❌ No se pudo iniciar: {_api_error(resp)}")
+            except requests.RequestException as e:
+                st.error(f"❌ No se pudo conectar con el servidor: {e}")
 
     # Wind metrics if available
     if wind_data and route_data["wind_weight"] > 0:

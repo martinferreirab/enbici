@@ -1,23 +1,56 @@
+import { useEffect, useRef } from "react";
 import { StyleSheet } from "react-native";
-import { WebView } from "react-native-webview";
+import MapView, { Marker, Polyline, Region } from "react-native-maps";
+import { Coordinate } from "../types/route";
 
-const IDLE_HTML = `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<style>html,body,#m{height:100%;margin:0}</style></head><body><div id="m"></div>
-<script>var m=L.map('m').setView([-34.9011,-56.1645],13);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(m);</script></body></html>`;
+const MONTEVIDEO: Region = { latitude: -34.9011, longitude: -56.1645, latitudeDelta: 0.12, longitudeDelta: 0.12 };
+const TRACKING_ZOOM = 17;
 
-export function MapViewer({ uri }: { uri: string | null }) {
+interface Props {
+  coordinates: Coordinate[];
+  /** GPS tracking active: shows the user dot and keeps the camera on them, north up. */
+  tracking: boolean;
+  position: Coordinate | null;
+}
+
+const toLatLng = (c: Coordinate) => ({ latitude: c.lat, longitude: c.lon });
+
+export function MapViewer({ coordinates, tracking, position }: Props) {
+  const map = useRef<MapView>(null);
+  const points = coordinates.map(toLatLng);
+
+  // Frame the whole route when a new one arrives (bottom padding clears the sheet).
+  useEffect(() => {
+    if (points.length > 1 && !tracking) {
+      map.current?.fitToCoordinates(points, { edgePadding: { top: 180, right: 50, bottom: 380, left: 50 }, animated: true });
+    }
+  }, [coordinates]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Follow the user with a fixed orientation (heading 0 = north up, flat).
+  useEffect(() => {
+    if (tracking && position) {
+      map.current?.animateCamera({ center: toLatLng(position), heading: 0, pitch: 0, zoom: TRACKING_ZOOM }, { duration: 800 });
+    }
+  }, [tracking, position]);
+
   return (
-    <WebView
+    <MapView
+      ref={map}
       style={StyleSheet.absoluteFill}
-      originWhitelist={["*"]}
-      source={uri ? { uri } : { html: IDLE_HTML }}
-      key={uri ?? "idle"}
-      javaScriptEnabled
-      domStorageEnabled
-      mixedContentMode="always"
-    />
+      initialRegion={MONTEVIDEO}
+      showsUserLocation={tracking}
+      showsMyLocationButton={false}
+      toolbarEnabled={false}
+      rotateEnabled={!tracking}
+      pitchEnabled={!tracking}
+    >
+      {points.length > 1 && (
+        <>
+          <Polyline coordinates={points} strokeColor="#2563eb" strokeWidth={5} />
+          <Marker coordinate={points[0]} title="Origen" pinColor="green" />
+          <Marker coordinate={points[points.length - 1]} title="Destino" pinColor="red" />
+        </>
+      )}
+    </MapView>
   );
 }

@@ -10,6 +10,11 @@ class WindMetrics(BaseModel):
     )
 
 
+class Coordinate(BaseModel):
+    lat: float
+    lon: float
+
+
 class RouteResponse(BaseModel):
     """Single optimal route response."""
     distance_km: float = Field(..., description="Route distance in kilometers")
@@ -19,3 +24,6 @@ class RouteResponse(BaseModel):
         None, description="Wind metrics if wind_weight > 0"
     )
     map_url: str = Field(..., description="URL to the generated map HTML file")
+    route_coordinates: list[Coordinate] = Field(
+        default_factory=list, description="Route polyline nodes as [{lat, lon}, ...] for native maps"
+    )

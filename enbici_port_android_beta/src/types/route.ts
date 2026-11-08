@@ -4,11 +4,17 @@ export interface WindMetrics {
   average_headwind_factor: number;
 }
 
+export interface Coordinate {
+  lat: number;
+  lon: number;
+}
+
 export interface RouteResponse {
   distance_km: number;
   elevation_gain_m: number;
   node_count: number;
   map_url: string;
+  route_coordinates: Coordinate[];
   wind_metrics: WindMetrics | null;
 }
 
@@ -30,3 +36,24 @@ export const DEFAULT_FILTERS: RouteFilters = {
   allow_parks: true,
   max_against_traffic_blocks: 0,
 };
+
+/** Journey saved by an authenticated user (POST /users/me/routes). */
+export interface JourneyPayload extends RouteFilters {
+  origin_place: string;
+  dest_place: string;
+  distance_km: number;
+  elevation_gain_m: number;
+}
+
+export interface SavedJourney extends JourneyPayload {
+  id: number;
+  timestamp: string;
+  is_started: boolean;
+  is_completed: boolean;
+}
+
+export interface AuthResponse {
+  access_token: string;
+  token_type: string;
+  username: string;
+}

@@ -183,6 +183,17 @@ headwind_factor = (1 + cos(ángulo_viento_rumbo)) / 2   # 0=tailwind, 1=headwind
   - `GET /route` sigue siendo público/anónimo.
 - **JWT**: HS256, PyJWT, expira a los 30 días, `sub` = id de usuario (string). Secreto: env `ENBICI_JWT_SECRET`, o se autogenera en `data/.jwt_secret` (gitignored; si se borra, se invalidan todas las sesiones).
 - **Gotcha deps**: `passlib 1.7.4` es incompatible con `bcrypt>=5`; está pineado `bcrypt==4.0.1`. Instalado con `uv add sqlalchemy passlib "bcrypt==4.0.1" pyjwt`.
+- **Tracking de viaje (2026-11-08)**:
+  - `journey_logs` suma `is_started` e `is_completed` (bool, default `False`).
+  - Nueva tabla `journey_telemetry`: `id`, `journey_id` (FK → `journey_logs.id`), `lat`, `lon`, `timestamp` (UTC, default now), `speed_ms` (nullable).
+  - Endpoints (Bearer, `{journey_id}` en el path; 404 si el viaje no existe o es de otro usuario):
+    - `POST /users/me/routes/{journey_id}/start` → `is_started = True`, devuelve el viaje.
+    - `POST /users/me/routes/{journey_id}/telemetry` body `{lat, lon, speed_ms?}` → 201, inserta en `journey_telemetry`.
+    - `POST /users/me/routes/{journey_id}/finish` → `is_completed = True`, devuelve el viaje.
+  - `JourneyOut` ahora incluye `is_started`/`is_completed`.
+  - **Migración**: `init_db()` agrega con `ALTER TABLE` las dos columnas nuevas si el `.db` es anterior (la tabla de telemetría la crea `create_all`). No hace falta borrar la BD.
+  - `GET /route` devuelve además `route_coordinates: [{lat, lon}, ...]` (nodos de la ruta) para dibujar con mapas nativos; `map_url` (Folium) sigue igual para Streamlit.
+  - Streamlit: botón "▶️ Simular Inicio de Ruta" (visible tras guardar el viaje) → `/start` + thread daemon que postea a `/telemetry` cada 15 s la Plaza Independencia (-34.9060, -56.1996); botón para detener. El thread no toca `st.session_state` (usa un `threading.Event`).
 - Pendiente: HTTPS en producción (hoy el token viaja por http en LAN), rate limiting de login, endpoint para borrar viajes.
 
 ---
@@ -208,3 +219,29 @@ headwind_factor = (1 + cos(ángulo_viento_rumbo)) / 2   # 0=tailwind, 1=headwind
 17. **Boot time**: ~8.43s due to park path & against-traffic re-marking on every load. No external elevation API calls. Acceptable for production.
 18. Actualizar este archivo al cerrar cada sesión con cambios, decisiones y resultados nuevos
 19. **Graph cache is now two-tier**: `load_montevideo_graph()` checks `data/montevideo_final.pkl` (binary DiGraph, fast path, ~0.25s) before falling back to `data/montevideo.graphml` (XML, build path, only runs once). If you update the `.graphml` directly (e.g. re-running `enrich_elevation_idw.py`), delete `data/montevideo_final.pkl` afterward or the server will keep serving the stale pickled graph.
+
+---
+
+## Sesión 2026-11-08 — Tracking GPS en tiempo real (resumen para el próximo agente)
+
+**Estado**: funcionando de punta a punta (probado en un Android real: ruta en mapa nativo, `/start`, telemetría cada ~15 s en `journey_telemetry`, mock de Streamlit). Detalle de tablas/endpoints en la sección "Tracking de viaje (2026-11-08)" de arriba.
+
+### Qué se hizo
+- Backend: flags `is_started`/`is_completed`, tabla `journey_telemetry`, endpoints `start`/`telemetry`/`finish`, `route_coordinates` en `GET /route`, migración automática con `ALTER TABLE` en `init_db()` (`src/db/database.py`).
+- Streamlit: "Simular Inicio de Ruta" (thread daemon, Plaza Independencia cada 15 s, botón de stop).
+- `consulta_prueba.py` ahora también vuelca la telemetría a `data/telemetria_viajes.csv` (además de `historial_viajes.csv`).
+- App móvil (ver `enbici_port_android_beta/journey_app_android.md`): mapa nativo + tracking.
+
+### Gotchas / errores encontrados
+1. **Los endpoints de viaje exigen `journey_id`**: hay que guardar la ruta (`POST /users/me/routes`) antes de iniciarla. La app lo hace sola al presionar "Iniciar Ruta" (pide login si hace falta).
+2. **Verificación parcial en la sesión**: los tests de los endpoints se hicieron llamando a las funciones directo sobre una copia del `.db`; `starlette.testclient` pide `httpx2`, que no se instaló. Si se quiere test HTTP real: agregar `httpx2` como dep de dev.
+3. **El thread de Streamlit no puede tocar `st.session_state`** (no hay script-run context); usa un `threading.Event` guardado en session_state para detenerlo. Cambiar de ruta detiene la simulación.
+4. **Telemetría con celular quieto**: `speed_ms` ronda 0–1 m/s por ruido de GPS; no interpretar como movimiento.
+5. `data/*.csv` y `output/*.html` son generados; se re-escriben al correr `consulta_prueba.py` / el servidor.
+6. Hay dos copias del cliente móvil: el proyecto real y activo es `../enbici_port_android_beta` (repo git propio); `enbici/enbici_port_android_beta/` es un snapshot dentro de este repo. Se sincroniza copiando fuentes (sin `node_modules`, sin API key).
+
+### Pendiente / ideas
+- Rate limiting, HTTPS, borrar viajes (ya estaban pendientes).
+- Endpoint para leer la telemetría de un viaje (hoy solo se ve vía SQL / `consulta_prueba.py`).
+- Chequeo de llegada solo cada 15 s en la app; no hay tracking en background.
+- Tests HTTP automatizados de los endpoints de viaje.
