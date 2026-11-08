@@ -5,7 +5,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from src.api.schemas import RouteResponse, WindMetrics
+from src.api.users import router as users_router
 from src.api.weather import fetch_wind_data
+from src.db.database import init_db
 from src.graph.loader import load_montevideo_graph
 from src.routing.pathfinder import find_route, nearest_node, compute_route_metrics
 from src.utils.geocoding import geocode_place
@@ -18,6 +20,7 @@ G = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global G
+    init_db()
     # Startup: load graph once
     G = load_montevideo_graph()
     print("✓ Montevideo graph loaded and cached in memory")
@@ -39,6 +42,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(users_router)
 
 # Mount static files for serving generated maps
 app.mount("/static", StaticFiles(directory="output"), name="static")

@@ -5,6 +5,7 @@ description = "Motor de ruteo para bicicletas en Montevideo con ponderación por
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "bcrypt==4.0.1",
     "fastapi>=0.140.13",
     "folium>=0.20.0",
     "geopy>=2.5.0",
@@ -12,11 +13,14 @@ dependencies = [
     "numpy>=2.5.1",
     "osmnx>=2.1.1",
     "pandas>=3.0.5",
+    "passlib>=1.7.4",
     "plotly>=5.18.0",
     "pydantic>=2.13.4",
+    "pyjwt>=2.15.1",
     "requests>=2.34.2",
     "scikit-learn>=1.9.0",
     "scipy>=1.18.0",
+    "sqlalchemy>=2.1.6",
     "streamlit>=1.60.0",
     "streamlit-folium>=0.27.3",
     "uvicorn>=0.51.0",

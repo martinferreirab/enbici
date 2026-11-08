@@ -168,6 +168,25 @@ headwind_factor = (1 + cos(ángulo_viento_rumbo)) / 2   # 0=tailwind, 1=headwind
 
 ---
 
+## Usuarios y bitácora de viajes (SQLite + JWT)
+
+- **BD**: SQLite vía SQLAlchemy síncrono (2.x) en `data/enbici.db` (gitignored). `init_db()` (`create_all`) corre en el `lifespan` de `src/api/app.py`, antes de cargar el grafo. No hay migraciones: si cambia el esquema, borrar el `.db` o migrar a mano.
+- **Estructura**: `src/db/` (`database.py` engine/sesión/`get_db`, `models.py`), `src/auth/security.py` (bcrypt, JWT, dependency `get_current_user`), `src/api/users.py` (router, incluido en `app.py`). El ruteo no se tocó.
+- **Tablas**:
+  - `users`: `id`, `username` (único, se guarda en minúsculas), `password_hash` (bcrypt).
+  - `journey_logs`: `id`, `user_id` (FK), `origin_place`, `dest_place`, `distance_km`, `elevation_gain_m`, **y las preferencias con que se calculó la ruta**: `elevation_weight`, `wind_weight`, `allow_parks`, `max_against_traffic_blocks`, más `timestamp` (UTC). Guardar los filtros permite reproducir el viaje o analizar qué preferencias usa la gente.
+- **Endpoints** (JSON):
+  - `POST /register` `{username (3-50), password (6-72)}` → 201 `{access_token, token_type, username}`; 409 si el usuario existe.
+  - `POST /login` mismo body → `{access_token, ...}`; 401 si credenciales inválidas.
+  - `POST /users/me/routes` (Bearer) body = campos de `journey_logs` sin id/user/timestamp → 201 con el registro.
+  - `GET /users/me/routes` (Bearer) → lista del usuario, más reciente primero.
+  - `GET /route` sigue siendo público/anónimo.
+- **JWT**: HS256, PyJWT, expira a los 30 días, `sub` = id de usuario (string). Secreto: env `ENBICI_JWT_SECRET`, o se autogenera en `data/.jwt_secret` (gitignored; si se borra, se invalidan todas las sesiones).
+- **Gotcha deps**: `passlib 1.7.4` es incompatible con `bcrypt>=5`; está pineado `bcrypt==4.0.1`. Instalado con `uv add sqlalchemy passlib "bcrypt==4.0.1" pyjwt`.
+- Pendiente: HTTPS en producción (hoy el token viaja por http en LAN), rate limiting de login, endpoint para borrar viajes.
+
+---
+
 ## Notas para el agente en futuras sesiones
 
 1. **Leer primero**: `journey.md`, `source_idea.md`, `tip_skills.md`

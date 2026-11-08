@@ -8,3 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Local DB and secrets
+data/enbici.db
+data/.jwt_secret

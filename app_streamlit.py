@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import logging
+import os
 
 import folium
 import plotly.graph_objects as go
+import requests
 import streamlit as st
 from streamlit_folium import st_folium
 
@@ -18,6 +20,8 @@ from src.visualization.map_export import export_route_map
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+API_URL = os.getenv("ENBICI_API_URL", "http://localhost:8000")
 
 # Page config
 st.set_page_config(
@@ -58,10 +62,68 @@ if "calculated_route" not in st.session_state:
     st.session_state.calculated_route = None
 if "last_route_key" not in st.session_state:
     st.session_state.last_route_key = None
+if "token" not in st.session_state:
+    st.session_state.token = None
+if "username" not in st.session_state:
+    st.session_state.username = None
+
+
+def _api_error(resp: requests.Response) -> str:
+    """Extract a readable error message from a FastAPI error response."""
+    try:
+        detail = resp.json().get("detail")
+    except ValueError:
+        detail = None
+    if isinstance(detail, list):  # pydantic validation errors
+        detail = "; ".join(str(d.get("msg", d)) for d in detail)
+    return str(detail or f"HTTP {resp.status_code}")
+
+
+def _auth(endpoint: str, username: str, password: str) -> None:
+    """POST credentials to /login or /register and store the session on success."""
+    try:
+        resp = requests.post(
+            f"{API_URL}/{endpoint}",
+            json={"username": username, "password": password},
+            timeout=10,
+        )
+    except requests.RequestException as e:
+        st.error(f"❌ No se pudo conectar con el servidor: {e}")
+        return
+    if resp.ok:
+        data = resp.json()
+        st.session_state.token = data["access_token"]
+        st.session_state.username = data["username"]
+        st.rerun()
+    else:
+        st.error(f"❌ {_api_error(resp)}")
 
 
 # Sidebar for input controls
 with st.sidebar:
+    st.header("👤 Cuenta")
+    if st.session_state.token:
+        st.success(f"Bienvenido, {st.session_state.username} 👋")
+        if st.button("Cerrar Sesión", use_container_width=True):
+            st.session_state.token = None
+            st.session_state.username = None
+            st.rerun()
+    else:
+        login_tab, register_tab = st.tabs(["Iniciar Sesión", "Registrarse"])
+        with login_tab:
+            with st.form("login_form"):
+                login_user = st.text_input("Usuario", key="login_user")
+                login_pass = st.text_input("Contraseña", type="password", key="login_pass")
+                if st.form_submit_button("Entrar", use_container_width=True):
+                    _auth("login", login_user, login_pass)
+        with register_tab:
+            with st.form("register_form"):
+                reg_user = st.text_input("Usuario", key="reg_user", help="Mínimo 3 caracteres")
+                reg_pass = st.text_input("Contraseña", type="password", key="reg_pass", help="Mínimo 6 caracteres")
+                if st.form_submit_button("Crear cuenta", use_container_width=True):
+                    _auth("register", reg_user, reg_pass)
+
+    st.divider()
     st.header("⚙️ Parámetros de Ruta")
 
     st.subheader("🔍 Búsqueda por Nombre")
@@ -206,6 +268,8 @@ if calculate_button:
                         "dest_lat": dest_lat,
                         "dest_lon": dest_lon,
                         "wind_data": wind_data,
+                        "origin_place": origin_place.strip() or f"{origin_lat:.4f}, {origin_lon:.4f}",
+                        "dest_place": dest_place.strip() or f"{dest_lat:.4f}, {dest_lon:.4f}",
                         "elevation_weight": elevation_weight,
                         "wind_weight": wind_weight,
                         "allow_parks": allow_parks,
@@ -305,6 +369,41 @@ if st.session_state.calculated_route:
                 st.metric("💨 Viento", "N/A")
         else:
             st.metric("💨 Viento", "—" if route_data["wind_weight"] == 0 else "N/A")
+
+    # Save route (requires login)
+    logged_in = bool(st.session_state.token)
+    if st.button(
+        "💾 Guardar Ruta",
+        disabled=not logged_in,
+        help=None if logged_in else "Inicia sesión para guardar rutas",
+    ):
+        payload = {
+            "origin_place": route_data["origin_place"],
+            "dest_place": route_data["dest_place"],
+            "distance_km": metrics.total_distance_m / 1000,
+            "elevation_gain_m": metrics.total_elevation_gain_m,
+            "elevation_weight": route_data["elevation_weight"],
+            "wind_weight": route_data["wind_weight"],
+            "allow_parks": route_data["allow_parks"],
+            "max_against_traffic_blocks": route_data["max_against_traffic_blocks"],
+        }
+        try:
+            resp = requests.post(
+                f"{API_URL}/users/me/routes",
+                json=payload,
+                headers={"Authorization": f"Bearer {st.session_state.token}"},
+                timeout=10,
+            )
+            if resp.ok:
+                st.success("✅ Ruta guardada")
+            elif resp.status_code == 401:
+                st.session_state.token = None
+                st.session_state.username = None
+                st.error("❌ Sesión expirada, inicia sesión nuevamente")
+            else:
+                st.error(f"❌ No se pudo guardar: {_api_error(resp)}")
+        except requests.RequestException as e:
+            st.error(f"❌ No se pudo conectar con el servidor: {e}")
 
     # Wind metrics if available
     if wind_data and route_data["wind_weight"] > 0:

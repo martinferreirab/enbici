@@ -1,0 +1,3 @@
+id,user_id,origin_place,dest_place,distance_km,elevation_gain_m,elevation_weight,wind_weight,allow_parks,max_against_traffic_blocks,timestamp,username
+1,1,plaza independencia,fortaleza del cerro,11.902717475922238,75.18129664388485,9.5,2.0,1,2,2026-10-30 17:24:44.093570,martin1
+2,2,plaza independencia,cerro,10.961848796755975,64.30889266834271,10.0,5.0,1,2,2026-11-06 01:03:52.050919,santi12
