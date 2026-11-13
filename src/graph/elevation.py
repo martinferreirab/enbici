@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 OPEN_METEO_ELEVATION_URL = "https://api.open-meteo.com/v1/elevation"
-MAX_GRADE = 0.25
+MAX_GRADE = 0.45
 BATCH_SIZE = 1000
 
 
@@ -90,9 +90,11 @@ def add_node_elevations(G: nx.MultiDiGraph) -> None:
     logger.info("✓ Elevation enrichment complete: %d nodes with real topography", len(nodes))
 
 
-def compute_edge_grades(G: nx.MultiDiGraph) -> None:
+def compute_edge_grades(G: nx.MultiDiGraph | nx.DiGraph) -> None:
     """Calcula y persiste ``grade`` (pendiente relativa) en cada arista."""
-    for u, v, _key, data in G.edges(keys=True, data=True):
+    edges = G.edges(keys=True, data=True) if G.is_multigraph() else G.edges(data=True)
+    for edge in edges:
+        u, v, data = edge[0], edge[1], edge[-1]
         length = data.get("length", 0.0)
         if length <= 0:
             data["grade"] = 0.0
@@ -104,7 +106,7 @@ def compute_edge_grades(G: nx.MultiDiGraph) -> None:
         data["grade"] = max(-MAX_GRADE, min(MAX_GRADE, grade))
 
 
-def enrich_graph_with_elevation(G: nx.MultiDiGraph) -> None:
+def enrich_graph_with_elevation(G: nx.MultiDiGraph | nx.DiGraph) -> None:
     """Agrega elevaciones y pendientes si aún no están presentes en el grafo."""
     sample_node = next(iter(G.nodes(data=True)))[1]
     if "elevation" not in sample_node:

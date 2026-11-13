@@ -38,13 +38,16 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.graph.elevation import MAX_GRADE  # noqa: E402
+
 GRAPH_CACHE_PATH = PROJECT_ROOT / "data" / "montevideo.graphml"
 SAMPLES_CACHE_PATH = PROJECT_ROOT / "data" / "elevation_samples_cache.json"
 
 OPEN_METEO_ELEVATION_URL = "https://api.open-meteo.com/v1/elevation"
 BATCH_SIZE = 100  # Open-Meteo hard cap: max 100 coordinates per request
 BATCH_DELAY_SECONDS = 1.0
-MAX_GRADE = 0.25
 GRID_CELL_METERS = 100.0
 IDW_K_NEIGHBORS = 8
 IDW_POWER = 2

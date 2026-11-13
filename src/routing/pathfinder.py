@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import networkx as nx
 import osmnx as ox
 
-from src.routing.cost import edge_cost, _calculate_bearing
+from src.routing.cost import (
+    CONSECUTIVE_CLIMB_MULTIPLIER,
+    CONSECUTIVE_CLIMB_RATIO_THRESHOLD,
+    _calculate_bearing,
+    edge_cost,
+    elevation_cost_ratio,
+)
 
 if TYPE_CHECKING:
     from networkx import DiGraph
@@ -27,6 +34,7 @@ class RouteMetrics:
     wind_weight: float = 0.0
     average_wind_speed_ms: float = 0.0
     average_headwind_factor: float = 0.0
+    live_buses_near_route: int | None = None
 
 
 def nearest_node(G: DiGraph, lat: float, lon: float) -> int:
@@ -43,10 +51,11 @@ def find_route(
     wind_weight: float = 0.0,
     allow_parks: bool = True,
     max_against_traffic_blocks: int = 0,
+    bus_counts: Mapping[tuple[int, int], int] | None = None,
 ) -> list[int]:
-    """Calcula la ruta de costo mínimo entre dos nodos (Dijkstra)."""
+    """Calcula la ruta de costo mínimo, considerando subidas y buses cercanos."""
 
-    def weight_func(u: int, v: int, data: dict) -> float:
+    def edge_weight(u: int, v: int, data: dict) -> float:
         edge_bearing = None
         wind_for_edge = wind_data
 
@@ -63,9 +72,10 @@ def find_route(
             if isinstance(wind_data, WindGrid):
                 wind_for_edge = wind_data.get_wind_at_location(lat1, lon1)
 
-        return edge_cost(
+        grade = data.get("grade", 0.0)
+        cost = edge_cost(
             data.get("length", 0.0),
-            data.get("grade", 0.0),
+            grade,
             elevation_weight,
             wind_data=wind_for_edge,
             wind_weight=wind_weight,
@@ -74,9 +84,41 @@ def find_route(
             allow_parks=allow_parks,
             is_against_traffic=data.get("is_against_traffic", False),
             max_against_traffic_blocks=max_against_traffic_blocks,
+            bus_count=bus_counts.get((u, v), 0) if bus_counts else 0,
         )
+        return cost
 
-    return nx.shortest_path(G, origin_node, dest_node, weight=weight_func)
+    state_graph = nx.DiGraph()
+    target = object()
+
+    for u, v, data in G.edges(data=True):
+        grade = data.get("grade", 0.0)
+        is_costly_uphill = (
+            elevation_cost_ratio(grade, elevation_weight)
+            > CONSECUTIVE_CLIMB_RATIO_THRESHOLD
+        )
+        base_edge_cost = edge_weight(u, v, data)
+        for previous_edge_was_costly_uphill in (False, True):
+            source_state = (u, previous_edge_was_costly_uphill)
+            destination_state = (v, is_costly_uphill)
+            weight = base_edge_cost
+            if previous_edge_was_costly_uphill and is_costly_uphill:
+                weight *= CONSECUTIVE_CLIMB_MULTIPLIER
+            state_graph.add_edge(
+                source_state,
+                destination_state,
+                weight=weight,
+            )
+
+    state_graph.add_edge((dest_node, False), target, weight=0.0)
+    state_graph.add_edge((dest_node, True), target, weight=0.0)
+    state_path = nx.shortest_path(
+        state_graph,
+        (origin_node, False),
+        target,
+        weight="weight",
+    )
+    return [node for node, _ in state_path[:-1]]
 
 
 def compute_route_metrics(
@@ -87,6 +129,7 @@ def compute_route_metrics(
     wind_weight: float = 0.0,
     allow_parks: bool = True,
     max_against_traffic_blocks: int = 0,
+    bus_counts: Mapping[tuple[int, int], int] | None = None,
 ) -> RouteMetrics:
     """Calcula distancia total, desnivel y métricas de viento de una ruta."""
     total_distance = 0.0
@@ -94,9 +137,12 @@ def compute_route_metrics(
     wind_speed_sum = 0.0
     headwind_factor_sum = 0.0
     edge_count = 0
+    live_buses_near_route = 0
 
     for u, v in zip(path[:-1], path[1:], strict=True):
         edge_data = G.edges[u, v]
+        if bus_counts:
+            live_buses_near_route += bus_counts.get((u, v), 0)
         length = edge_data.get("length", 0.0)
         total_distance += length
 
@@ -148,6 +194,7 @@ def compute_route_metrics(
         wind_weight=wind_weight,
         average_wind_speed_ms=average_wind_speed,
         average_headwind_factor=average_headwind_factor,
+        live_buses_near_route=(
+            live_buses_near_route if bus_counts is not None else None
+        ),
     )
-
-

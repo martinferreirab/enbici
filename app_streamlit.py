@@ -10,6 +10,7 @@ import plotly.graph_objects as go
 import streamlit as st
 from streamlit_folium import st_folium
 
+from src.api.buses import BusApiError, fetch_bus_traffic
 from src.api.weather import fetch_wind_data
 from src.graph.loader import load_montevideo_graph
 from src.routing.pathfinder import find_route, nearest_node, compute_route_metrics
@@ -139,7 +140,7 @@ with st.sidebar:
     )
 
     # Clear route if weights change (to avoid showing old metrics with new weights)
-    current_route_key = f"route_{st.session_state.origin_coords}_{st.session_state.dest_coords}_{elevation_weight}_{wind_weight}_{allow_parks}_{max_against_traffic_blocks}"
+    current_route_key = f"route_{st.session_state.origin_coords}_{st.session_state.dest_coords}_{elevation_weight}_{wind_weight}_{allow_parks}_{max_against_traffic_blocks}_live_bus_v1"
     if st.session_state.last_route_key and st.session_state.last_route_key != current_route_key:
         st.session_state.calculated_route = None
     st.session_state.last_route_key = current_route_key
@@ -175,6 +176,8 @@ if calculate_button:
                 if wind_weight > 0:
                     wind_data = fetch_wind_data()
 
+                bus_traffic = fetch_bus_traffic(graph)
+
                 path = find_route(
                     graph,
                     origin_node,
@@ -184,6 +187,7 @@ if calculate_button:
                     wind_weight=wind_weight,
                     allow_parks=allow_parks,
                     max_against_traffic_blocks=max_against_traffic_blocks,
+                    bus_counts=bus_traffic.edge_counts,
                 )
 
                 if path:
@@ -195,6 +199,7 @@ if calculate_button:
                         wind_weight=wind_weight,
                         allow_parks=allow_parks,
                         max_against_traffic_blocks=max_against_traffic_blocks,
+                        bus_counts=bus_traffic.edge_counts,
                     )
 
                     # Store route data in session state for persistence across re-runs
@@ -210,13 +215,21 @@ if calculate_button:
                         "wind_weight": wind_weight,
                         "allow_parks": allow_parks,
                         "max_against_traffic_blocks": max_against_traffic_blocks,
-                        "map_key": f"map_{origin_lat:.4f}_{origin_lon:.4f}_{dest_lat:.4f}_{dest_lon:.4f}_{elevation_weight}_{wind_weight}_{allow_parks}_{max_against_traffic_blocks}",
+                        "bus_data_fetched_at": bus_traffic.fetched_at,
+                        "map_key": f"map_{origin_lat:.4f}_{origin_lon:.4f}_{dest_lat:.4f}_{dest_lon:.4f}_{elevation_weight}_{wind_weight}_{allow_parks}_{max_against_traffic_blocks}_{bus_traffic.fetched_at.timestamp()}",
                     }
 
                     st.success("✅ Ruta calculada exitosamente")
+                    st.caption(
+                        f"Tránsito considerado: {metrics.live_buses_near_route} "
+                        "ómnibus recientes ubicados cerca de los tramos de esta ruta."
+                    )
                 else:
                     st.error("❌ No se encontró ruta entre los puntos")
 
+        except BusApiError as e:
+            st.error(f"❌ No se pudo considerar el tránsito en vivo: {e}")
+            logger.exception("Live bus data error")
         except Exception as e:
             st.error(f"❌ Error al calcular ruta: {str(e)}")
             logger.exception("Routing error")
@@ -279,7 +292,7 @@ if st.session_state.calculated_route:
     # 2. Route Metrics
     st.subheader("📊 Métricas de Ruta")
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric(
             "📏 Distancia",
@@ -305,6 +318,15 @@ if st.session_state.calculated_route:
                 st.metric("💨 Viento", "N/A")
         else:
             st.metric("💨 Viento", "—" if route_data["wind_weight"] == 0 else "N/A")
+    with col4:
+        bus_count = (
+            metrics.live_buses_near_route
+            if metrics.live_buses_near_route is not None
+            else "N/D"
+        )
+        st.metric("🚌 Ómnibus en la ruta", bus_count)
+    bus_data_time = route_data["bus_data_fetched_at"].astimezone().strftime("%H:%M:%S")
+    st.caption(f"Última consulta de ómnibus a la IM: {bus_data_time} (hora local).")
 
     # Wind metrics if available
     if wind_data and route_data["wind_weight"] > 0:

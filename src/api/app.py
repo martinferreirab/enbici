@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from src.api.schemas import RouteResponse, WindMetrics
+from src.api.buses import BusApiError, fetch_bus_traffic
 from src.api.weather import fetch_wind_data
 from src.graph.loader import load_montevideo_graph
 from src.routing.pathfinder import find_route, nearest_node, compute_route_metrics
@@ -28,7 +29,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="enbici API",
-    description="Bike routing engine for Montevideo with elevation-aware cost function",
+    description="Bike routing engine for Montevideo with elevation, wind, and live bus costs",
     version="2.0",
     lifespan=lifespan,
 )
@@ -131,6 +132,8 @@ async def get_route(
                 status_code=400, detail="Origin and destination are the same node"
             )
 
+        bus_traffic = fetch_bus_traffic(G)
+
         # Find optimal route
         path = find_route(
             G,
@@ -141,6 +144,7 @@ async def get_route(
             wind_weight=wind_weight,
             allow_parks=allow_parks,
             max_against_traffic_blocks=max_against_traffic_blocks,
+            bus_counts=bus_traffic.edge_counts,
         )
 
         if not path:
@@ -155,7 +159,10 @@ async def get_route(
             wind_weight=wind_weight,
             allow_parks=allow_parks,
             max_against_traffic_blocks=max_against_traffic_blocks,
+            bus_counts=bus_traffic.edge_counts,
         )
+        if metrics.live_buses_near_route is None:
+            raise BusApiError("No se pudieron calcular los buses cercanos a la ruta.")
 
         # Export map
         map_path = "output/ruta_montevideo.html"
@@ -183,12 +190,15 @@ async def get_route(
             distance_km=metrics.total_distance_m / 1000.0,
             elevation_gain_m=metrics.total_elevation_gain_m,
             node_count=metrics.node_count,
+            live_buses_near_route=metrics.live_buses_near_route,
             wind_metrics=wind_metrics,
             map_url="/static/ruta_montevideo.html",
         )
 
     except HTTPException:
         raise
+    except BusApiError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Routing error: {str(e)}")
 

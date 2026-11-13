@@ -18,4 +18,7 @@ class RouteResponse(BaseModel):
     wind_metrics: WindMetrics | None = Field(
         None, description="Wind metrics if wind_weight > 0"
     )
+    live_buses_near_route: int = Field(
+        ..., description="Fresh buses matched to edges on the recommended route"
+    )
     map_url: str = Field(..., description="URL to the generated map HTML file")

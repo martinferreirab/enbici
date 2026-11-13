@@ -64,11 +64,17 @@ def export_route_map(
         icon=folium.Icon(color="red", icon="flag"),
     ).add_to(fmap)
 
+    bus_metrics_html = (
+        f"Ómnibus cercanos: {metrics.live_buses_near_route}<br>"
+        if metrics.live_buses_near_route is not None
+        else ""
+    )
     metrics_html = (
         f"<b>{title}</b><br>"
         f"Peso elevación: {metrics.elevation_weight}<br>"
         f"Distancia: {metrics.total_distance_m / 1000:.2f} km<br>"
         f"Desnivel +: {metrics.total_elevation_gain_m:.1f} m<br>"
+        f"{bus_metrics_html}"
         f"Nodos: {metrics.node_count}"
     )
 
