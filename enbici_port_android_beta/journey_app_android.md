@@ -108,3 +108,23 @@ Buscar siempre el `Caused by:`. El `adb` vive en `platform-tools`; correr con `.
 - `react-native-webview` ya no está instalado; `map_url` del backend es solo para Streamlit.
 - Si se prueba el cierre automático a 20 m en dispositivo, usar un destino cercano a donde se está.
 - Pendiente: probar la llegada real (<20 m → alerta "Llegaste a destino"), tracking en background, test de pantalla con ruta muy larga (`fitToCoordinates` usa padding fijo).
+
+## Decisiones de estructura y credenciales (2026-11-08, cierre de sesión)
+
+- **Ubicación del código**: el cliente móvil es una carpeta del repo `enbici` (`enbici_port_android_beta/`, rama `martin`), no un repo aparte. Se borró el `.git` propio (solo tenía "Initial commit"). Las rutas de trabajo son `/home/martinferreirab/proyectos/enbici/enbici_port_android_beta`.
+- **API key de Google Maps fuera del repo**: `app.json` tiene el placeholder `YOUR_GOOGLE_MAPS_API_KEY`; `app.config.js` lo reemplaza con `process.env.GOOGLE_MAPS_API_KEY` (si no existe, queda el placeholder y el mapa sale negro). La key nunca estuvo en el historial de git.
+- **Cargar la key en EAS (una sola vez, persiste en la nube)**:
+  `npx eas-cli env:create --name GOOGLE_MAPS_API_KEY --value <key> --environment preview --visibility sensitive`.
+  Para cambiarla: `env:update` (o `env:delete` + `env:create`); ver lo cargado: `env:list --environment preview`. Está ligada al ambiente `preview`; para `development`/`production` hay que crearla también ahí. Antes de cada build solo se corre `npx eas-cli@latest build -p android --profile preview`.
+- **Cuándo hace falta rebuild**: cambios nativos (plugins, dependencias con código nativo, la key). Cambios solo de TypeScript no lo necesitan.
+- **Restricciones de la key en Google Cloud (pendiente de aplicar por el usuario)**: Application restrictions → Android apps con package `com.martinferreirab.enbici.beta` + SHA-1; API restrictions → solo "Maps SDK for Android"; alerta de presupuesto. La key viaja dentro del APK, así que las restricciones son la protección real. Ojo: no está verificado en este proyecto que las restricciones coincidan; si tras restringir el mapa sale negro, comparar el SHA-1 que muestra el logcat (`Google Android Maps SDK`) con el cargado.
+- **Qué SHA-1 usar**: el del keystore de firma que EAS guarda para el package (`npx eas-cli credentials -p android`, o expo.dev → Credentials → Android Keystore). Por defecto `development`, `preview` y `production` comparten ese keystore. Excepciones: builds locales (`expo run:android`) usan el keystore debug de la máquina; Google Play usa el SHA-1 de Play app signing (Play Console → App integrity). Se pueden cargar varios SHA-1 en la misma key.
+- **Gotcha de herramientas**: correr `./node_modules/.bin/tsc --noEmit` (o `npx tsc` solo dentro de este proyecto). `npx tsc` fuera del proyecto descarga un paquete homónimo, `tsc@2.0.4`, que no es TypeScript.
+
+## Cambios del backend que afectan a la app (2026-11-14)
+
+- `GET /route` acepta `bus_weight` (0-10, **opcional**, default 1.0) y devuelve `live_buses_near_route` (int o `null`). La app no lo envía todavía → usa peso 1 (1.15x/1.30x por tramo con 1-2 / 3+ ómnibus).
+- Si la API de ómnibus de la IM falla o faltan credenciales en el server (`.env`), `/route` **igual devuelve la ruta** (sin penalización por buses). Antes devolvía 503.
+- `POST /users/me/routes` acepta `bus_weight` opcional (default 1.0) y `GET /users/me/routes` lo devuelve. No requiere cambios en la app.
+- Cada consulta a `/route` queda registrada en `data/consultas_rutas.csv` del backend (`source=api`).
+- Pendiente: slider "Ómnibus" en `FilterModal.tsx` + campo en `src/types/route.ts` y en el payload de guardado.

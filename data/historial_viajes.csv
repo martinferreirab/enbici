@@ -1,3 +1,4 @@
-id,user_id,origin_place,dest_place,distance_km,elevation_gain_m,elevation_weight,wind_weight,allow_parks,max_against_traffic_blocks,timestamp,username
-1,1,plaza independencia,fortaleza del cerro,11.902717475922238,75.18129664388485,9.5,2.0,1,2,2026-10-30 17:24:44.093570,martin1
-2,2,plaza independencia,cerro,10.961848796755975,64.30889266834271,10.0,5.0,1,2,2026-11-06 01:03:52.050919,santi12
+id,user_id,username,origin_place,dest_place,distance_km,elevation_gain_m,elevation_weight,wind_weight,bus_weight,allow_parks,max_against_traffic_blocks,timestamp,is_started,is_completed,mult_bus_1_2,mult_bus_3_mas
+1,1,martin1,plaza independencia,fortaleza del cerro,11.902717475922238,75.18129664388485,9.5,2.0,0.0,1,2,2026-10-30 17:24:44.093570,0,0,1.0,1.0
+2,2,santi12,plaza independencia,cerro,10.961848796755975,64.30889266834271,10.0,5.0,0.0,1,2,2026-11-06 01:03:52.050919,0,0,1.0,1.0
+3,3,martinprueba2,club bohemios,Antel arena,5.863930006887659,40.640601370330565,10.0,10.0,0.0,0,3,2026-11-08 22:46:42.497338,1,0,1.0,1.0

@@ -94,6 +94,8 @@ uv run streamlit run app_streamlit.py  # UI interactiva en http://localhost:8501
 
 uv run python scripts/enrich_elevation_idw.py   # (re)generar elevación real; ver Decisiones técnicas
 uv run python scripts/test_elevation_routing.py # verificar que elevation_weight afecta el ruteo
+uv run python scripts/test_bus_traffic.py       # tests de costo/matching de ómnibus (sin red)
+uv run python consulta_prueba.py                # exporta journey_logs y telemetría a data/*.csv
 ```
 
 **Ejemplos `GET /route`:**
@@ -152,16 +154,16 @@ base_cost = length * elevation_ratio * park_multiplier * against_traffic_multipl
 cost = base_cost * wind_penalty * bus_multiplier  # si corresponde
 wind_penalty = 1 + (wind_weight/10) * wind_speed * headwind_factor
 headwind_factor = (1 + cos(ángulo_viento_rumbo)) / 2   # 0=tailwind, 1=headwind
-bus_multiplier = 1.0 (0 buses), 1.15 (1-2 buses), 1.30 (3+ buses)
+bus_multiplier = 1 + bus_weight * (base - 1)   # base: 1.0 (0 buses), 1.15 (1-2), 1.30 (3+)
 ```
 
 - Las pendientes **ascendentes** reciben penalizacion lineal por `elevation_weight`; las bajadas reciben los descuentos individuales descritos a continuacion.
 - Las bajadas se descuentan individualmente: menor a 10% cuesta 1.0x; de 10% a 25% inclusive cuesta 0.75x; mayor a 25% cuesta 0.5x. No reciben un recargo por continuidad.
 - La penalizacion de elevacion es lineal. Con peso 5, una subida de 5% hace que un tramo cueste 1.375 veces su longitud antes de aplicar los demas factores.
 - Si `elevation_ratio > 1.75` en dos aristas consecutivas, desde la segunda se multiplica el costo por `1.10`. Con peso 10, una subida de 5% tiene ratio exactamente 1.75 y no activa la regla; una pendiente mayor sí la supera. Se usa un grafo de estados en Dijkstra para que el costo dependa correctamente de si la arista anterior superó el umbral.
-- `park_multiplier`: 0.5x si `is_park_path` y `allow_parks=True` (incentivo); 10x si `allow_parks=False` (penalización).
+- `park_multiplier`: 0.2x si `is_park_path` y `allow_parks=True` (incentivo); 10x si `allow_parks=False` (penalización).
 - `against_traffic_multiplier`: `inf` si `max_against_traffic_blocks=0`; 1.8x si >0. **Limitación actual:** pese al nombre y al selector (0-3), el valor positivo solo habilita las aristas en contramano; no limita el recorrido a esa cantidad de cuadras.
-- `bus_multiplier`: se aplica a cada arista según la cantidad de buses asociados a esa arista: 0 buses = 1.0x, 1-2 = 1.15x, 3 o más = 1.30x. No se penalizan automáticamente las aristas vecinas ni toda la calle.
+- `bus_multiplier`: se aplica a cada arista según la cantidad de buses asociados a esa arista, escalado por `bus_weight` (0-10, default 1): con peso 1 → 0 buses = 1.0x, 1-2 = 1.15x, 3 o más = 1.30x; con peso 2 → 1.30x/1.60x; con peso 10 → 2.5x/4.0x; con peso 0 no se penaliza **ni se consulta la API**. No se penalizan automáticamente las aristas vecinas ni toda la calle.
 - Bearing de arista vía `_calculate_bearing(lat1, lon1, lat2, lon2)`.
 - Algoritmo: Dijkstra (`networkx.shortest_path`) con función de peso dinámica.
 
@@ -170,7 +172,9 @@ bus_multiplier = 1.0 (0 buses), 1.15 (1-2 buses), 1.30 (3+ buses)
 - Antes de calcular la ruta se consultan posiciones de ómnibus de la API de transporte público de Montevideo. Solo se consideran posiciones de hasta **300 segundos** de antigüedad.
 - La respuesta se cachea por **60 segundos** para el mismo grafo. Cada posición se asigna a la arista más cercana si está a no más de **30 metros**; si existe una arista inversa en el grafo, también se incrementa su conteo.
 - El conteo se usa durante la búsqueda de ruta, de modo que puede hacer preferible un desvío si la suma de costos resulta menor. Las posiciones reflejan el momento de la consulta, no predicen dónde estará el ómnibus cuando llegue la persona.
-- Si falla la consulta o la respuesta de la API de ómnibus es inválida, la UI informa el error; si la consulta es válida pero no hay posiciones que coincidan con el grafo, el conteo queda vacío y no se aplica penalización por buses.
+- **Opcional (2026-11-14)**: se usa `try_fetch_bus_traffic()`. Si faltan credenciales, falla la consulta o la respuesta es inválida, se loguea un `WARNING` (`Live bus data unavailable; routing without bus penalty`) y la ruta se calcula igual **sin penalización por buses** (`live_buses_near_route = null`; Streamlit muestra un aviso amarillo). Antes devolvía 503 y dejaba sin ruta a la app. Si la consulta es válida pero no hay posiciones que coincidan con el grafo, el conteo queda vacío (`live_buses_near_route = 0`).
+- **Credenciales**: OAuth2 `client_credentials` contra `mvdapi-auth.montevideo.gub.uy` con `MONTEVIDEO_CLIENT_ID` / `MONTEVIDEO_CLIENT_SECRET`. `src/api/buses.py` las lee de `<repo>/.env` con `python-dotenv` (gitignored, permisos 600); las variables exportadas en la shell tienen prioridad. No hace falta `--env-file`.
+- Con un fallo de red (no de credenciales) cada request reintenta la autenticación (timeout 10 s), así que el ruteo puede demorar hasta ~10-20 s extra mientras la API de la IM esté caída.
 - Los costos son unidades relativas de optimización (la longitud en metros ajustada por multiplicadores), no una medida literal de tiempo, esfuerzo o distancia. Las aristas del grafo no tienen necesariamente 100 m; agruparlas en tramos de 100 m es solo una forma de explicar el cálculo.
 
 Ejemplo **hipotético**, no salida de una ruta real: ocho tramos consecutivos de 100 m, `elevation_weight=10`, viento desactivado, sin parque ni contramano. Se muestra cómo se combinan la pendiente, el recargo por dos subidas consecutivas cuyo ratio supera 1.75, y los buses:
@@ -190,7 +194,9 @@ Ejemplo de cálculo del tramo 3: `100 m × 2.20 × 1.10 × 1.30 = 314.60`. Los t
 
 ### RouteMetrics / API
 
-- `RouteResponse` es **plano** (sin rutas alternativas): `distance_km`, `elevation_gain_m`, `node_count`, `map_url`, `wind_metrics` (null si `wind_weight=0`).
+- `RouteResponse` es **plano** (sin rutas alternativas): `distance_km`, `elevation_gain_m`, `node_count`, `map_url`, `wind_metrics` (null si `wind_weight=0`), `route_coordinates`, `live_buses_near_route` (int, o `null` si no hubo datos de ómnibus o `bus_weight=0`).
+- `GET /route` acepta `bus_weight` (0-10, default 1.0; >10 → 422).
+- **Log de consultas (2026-11-14)**: cada cálculo de ruta (Streamlit `source=streamlit`, API `source=api`) agrega una fila a `data/consultas_rutas.csv` vía `src/routing/query_log.py`: origen/destino, pesos, distancia, datos de ómnibus (frescos en la ciudad, asignados, en la ruta, tramos y metros con bus), multiplicadores y `bus_penalty_extra_m` (metros equivalentes sumados por la penalización). Si falla la escritura solo se loguea; nunca rompe el ruteo.
 - `WindGrid`: 4 puntos (SW Rambla, SE Pocitos, N Prado, NW Colón) fetched en un solo batch; `get_wind_at_location(lat, lon)` asigna el punto más cercano a cada arista.
 - Visualización: Folium, marcador verde=origen/rojo=destino, ruta única (sin dashed alternativas), export a `output/*.html`.
 
@@ -198,11 +204,11 @@ Ejemplo de cálculo del tramo 3: `100 m × 2.20 × 1.10 × 1.30 = 314.60`. Los t
 
 ## Usuarios y bitácora de viajes (SQLite + JWT)
 
-- **BD**: SQLite vía SQLAlchemy síncrono (2.x) en `data/enbici.db` (gitignored). `init_db()` (`create_all`) corre en el `lifespan` de `src/api/app.py`, antes de cargar el grafo. No hay migraciones: si cambia el esquema, borrar el `.db` o migrar a mano.
+- **BD**: SQLite vía SQLAlchemy síncrono (2.x) en `data/enbici.db` (gitignored). `init_db()` (`create_all`) corre en el `lifespan` de `src/api/app.py`, antes de cargar el grafo. No hay framework de migraciones: `_add_missing_journey_columns()` agrega con `ALTER TABLE` las columnas nuevas de `journey_logs` (`is_started`, `is_completed`, `bus_weight`) si faltan.
 - **Estructura**: `src/db/` (`database.py` engine/sesión/`get_db`, `models.py`), `src/auth/security.py` (bcrypt, JWT, dependency `get_current_user`), `src/api/users.py` (router, incluido en `app.py`). El ruteo no se tocó.
 - **Tablas**:
   - `users`: `id`, `username` (único, se guarda en minúsculas), `password_hash` (bcrypt).
-  - `journey_logs`: `id`, `user_id` (FK), `origin_place`, `dest_place`, `distance_km`, `elevation_gain_m`, **y las preferencias con que se calculó la ruta**: `elevation_weight`, `wind_weight`, `allow_parks`, `max_against_traffic_blocks`, más `timestamp` (UTC). Guardar los filtros permite reproducir el viaje o analizar qué preferencias usa la gente.
+  - `journey_logs`: `id`, `user_id` (FK), `origin_place`, `dest_place`, `distance_km`, `elevation_gain_m`, **y las preferencias con que se calculó la ruta**: `elevation_weight`, `wind_weight`, `bus_weight`, `allow_parks`, `max_against_traffic_blocks`, más `timestamp` (UTC). `bus_weight` (2026-11-14) es opcional en `POST /users/me/routes` (default 1.0, igual que `/route`); las filas anteriores a la migración quedaron en `0` porque se calcularon sin penalización por buses. Guardar los filtros permite reproducir el viaje o analizar qué preferencias usa la gente.
 - **Endpoints** (JSON):
   - `POST /register` `{username (3-50), password (6-72)}` → 201 `{access_token, token_type, username}`; 409 si el usuario existe.
   - `POST /login` mismo body → `{access_token, ...}`; 401 si credenciales inválidas.
@@ -247,7 +253,8 @@ Ejemplo de cálculo del tramo 3: `100 m × 2.20 × 1.10 × 1.30 = 314.60`. Los t
 17. **Boot time**: ~8.43s due to park path & against-traffic re-marking on every load. No external elevation API calls. Acceptable for production.
 18. Actualizar este archivo al cerrar cada sesión con cambios, decisiones y resultados nuevos
 19. **Graph cache is now two-tier**: `load_montevideo_graph()` checks `data/montevideo_final.pkl` (binary DiGraph, fast path, ~0.25s) before falling back to `data/montevideo.graphml` (XML, build path, only runs once). If you update the `.graphml` directly (e.g. re-running `enrich_elevation_idw.py`), delete `data/montevideo_final.pkl` afterward or the server will keep serving the stale pickled graph.
-20. **Live buses**: `fetch_bus_traffic()` returns per-edge counts for fresh positions. Routing applies the 1.15x/1.30x bus factor only to edges with matched buses; keep the freshness, cache, and 30m matching rules documented above in sync with `src/api/buses.py`.
+20. **Live buses**: `fetch_bus_traffic()` returns per-edge counts for fresh positions; entry points (API/Streamlit) must call `try_fetch_bus_traffic()` so a bus API failure never blocks routing. Routing applies `1 + bus_weight*(0.15|0.30)` only to edges with matched buses; keep the freshness, cache, and 30m matching rules documented above in sync with `src/api/buses.py`.
+21. **Grades se recalculan si cambia `MAX_GRADE`**: el pickle guarda `graph["grade_max"]`; si no coincide con `MAX_GRADE` (hoy 0.45), `load_montevideo_graph()` recalcula `grade` desde las elevaciones de los nodos y re-guarda el pickle. Cualquier nodo virtual que se agregue al grafo **debe tener una elevación realista** (los supernodos de parque usan la media de su componente), o el recálculo genera pendientes falsas.
 
 ---
 
@@ -274,3 +281,38 @@ Ejemplo de cálculo del tramo 3: `100 m × 2.20 × 1.10 × 1.30 = 314.60`. Los t
 - Endpoint para leer la telemetría de un viaje (hoy solo se ve vía SQL / `consulta_prueba.py`).
 - Chequeo de llegada solo cada 15 s en la app; no hay tracking en background.
 - Tests HTTP automatizados de los endpoints de viaje.
+
+### Decisiones de cierre (2026-11-08)
+- El cliente móvil pasó a ser una carpeta de este repo (`enbici_port_android_beta/`, rama `martin`); ya no hay repo aparte ni snapshot duplicado.
+- La API key de Google Maps no se versiona (placeholder en `app.json`, valor vía `GOOGLE_MAPS_API_KEY` en EAS env + `app.config.js`). Detalle y pasos en `enbici_port_android_beta/journey_app_android.md`.
+- Fix del crash de arranque en Android (R8 vs `androidx.work` traído por `react-native-maps`): R8 desactivado en `expo-build-properties`. Detalle en la bitácora de la app.
+- Tareas pendientes de configuración fuera del código: restringir la key en Google Cloud (package + SHA-1, solo Maps SDK for Android) y cargarla en EAS antes del próximo build.
+
+---
+
+## Sesión 2026-11-14 — Merge de `costo_con_buses_20261113` (costos de pendiente + ómnibus IMM)
+
+**Estado**: integrado en `martin` y `main`. Probado: `scripts/test_bus_traffic.py`, `scripts/test_elevation_routing.py`, imports de todos los módulos, `GET /route` contra la API real de la IM (≈470-490 ómnibus frescos, ≈470 asignados a ≈840 aristas), migración de `bus_weight` sobre copia del `.db`. Respaldo previo al merge: rama local `martin-backup-premerge`.
+
+### Qué se hizo
+- Merge del commit `5be3dff` (compañero): `src/api/buses.py`, nuevas funciones de costo (`elevation_cost_ratio` lineal, `downhill_cost_multiplier`, `bus_traffic_multiplier`, recargo por subidas consecutivas con grafo de estados), `MAX_GRADE` 0.25 → 0.45, recálculo de pendientes con `grade_max`.
+- Conflictos resueltos: `cost.py` (se tomó la versión nueva de costos, se mantuvo `park_multiplier` 0.2), `app.py` (imports de buses + usuarios/DB), `journey.md`, pickle (se mantuvo el nuestro con supernodos), `.md:Zone.Identifier` (basura de Windows, eliminada).
+- Agregado sobre el merge: buses opcionales (`try_fetch_bus_traffic`), `bus_weight` (API, Streamlit, `journey_logs`), `.env` + `python-dotenv`, `pyproj` explícito, log `data/consultas_rutas.csv`, `consulta_prueba.py` con columnas explícitas + multiplicadores, `use_container_width` → `width="stretch"`.
+
+### Errores / hallazgos
+1. **Pendientes de contramano con signo invertido** (bug previo): `_add_against_traffic_edges` copiaba `grade` de la arista original → 10.135 aristas a contramano tenían subidas como bajadas. Lo corrige el recálculo de pendientes del compañero.
+2. **Supernodos de parque con `elevation=0.0`**: combinado con el recálculo, iba a generar pendientes de hasta ±45% en las 720 aristas de parque (los parques están a ~21 m). Fix: elevación = media del componente (código + pickle existente). Quedan 3 aristas >10% de 0.3-10 m, despreciables.
+3. **`/route` devolvía 503 sin credenciales IMM** → app Android y Streamlit sin ruta. Ahora es opcional.
+4. **`consulta_prueba.py` exportaba `password_hash`** al CSV (y `id` duplicado) por el `SELECT *`. Corregido; ojo que versiones viejas de `data/historial_viajes.csv` con hashes **siguen en el historial de git**.
+5. `pyproj` se usaba directo pero solo llegaba transitivamente (vía geopandas/osmnx).
+
+### Gotchas
+- Al cargar el primer pickle sin `grade_max` el server tarda un poco más (recalcula y re-guarda `data/montevideo_final.pkl`).
+- `data/consultas_rutas.csv` crece sin límite (una fila por cálculo); no rota.
+- Penalizar buses puede cambiar la ruta en cualquier dirección (al encarecer la ruta A, la B puede pasar a ser óptima aunque sea más corta).
+
+### Pendiente
+- Rotar el secreto de la IMM (se compartió en un chat) y actualizar `.env`.
+- Slider de `bus_weight` en la app Android.
+- Decidir si `data/consultas_rutas.csv` se versiona o va a `.gitignore`.
+- Persistir `live_buses_near_route` en `journey_logs` si se quiere analizar viajes guardados.
