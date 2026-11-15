@@ -12,3 +12,4 @@ wheels/
 # Local DB and secrets
 data/enbici.db
 data/.jwt_secret
+.env

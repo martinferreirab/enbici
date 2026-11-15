@@ -32,6 +32,7 @@ class JourneyLog(Base):
     # Route preferences used to compute the route
     elevation_weight: Mapped[float] = mapped_column(Float)
     wind_weight: Mapped[float] = mapped_column(Float)
+    bus_weight: Mapped[float] = mapped_column(Float, default=1.0, server_default="0")
     allow_parks: Mapped[bool] = mapped_column(Boolean)
     max_against_traffic_blocks: Mapped[int] = mapped_column(Integer)
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

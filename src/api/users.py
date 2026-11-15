@@ -36,6 +36,7 @@ class JourneyCreate(BaseModel):
     elevation_gain_m: float = Field(..., ge=0)
     elevation_weight: float = Field(..., ge=0, le=10)
     wind_weight: float = Field(..., ge=0, le=10)
+    bus_weight: float = Field(1.0, ge=0, le=10)
     allow_parks: bool
     max_against_traffic_blocks: int = Field(..., ge=0, le=3)
 

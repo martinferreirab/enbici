@@ -33,6 +33,9 @@ def _add_missing_journey_columns() -> None:
         for col in ("is_started", "is_completed"):
             if col not in existing:
                 conn.execute(text(f"ALTER TABLE journey_logs ADD COLUMN {col} BOOLEAN NOT NULL DEFAULT 0"))
+        if "bus_weight" not in existing:
+            # Viajes previos a la integración de ómnibus se calcularon sin penalización -> 0.
+            conn.execute(text("ALTER TABLE journey_logs ADD COLUMN bus_weight FLOAT NOT NULL DEFAULT 0"))
 
 
 def get_db():

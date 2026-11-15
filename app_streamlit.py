@@ -13,9 +13,11 @@ import requests
 import streamlit as st
 from streamlit_folium import st_folium
 
+from src.api.buses import try_fetch_bus_traffic
 from src.api.weather import fetch_wind_data
 from src.graph.loader import load_montevideo_graph
 from src.routing.pathfinder import find_route, nearest_node, compute_route_metrics
+from src.routing.query_log import log_route_query
 from src.utils.geocoding import geocode_place
 from src.visualization.map_export import export_route_map
 
@@ -139,7 +141,7 @@ with st.sidebar:
     st.header("👤 Cuenta")
     if st.session_state.token:
         st.success(f"Bienvenido, {st.session_state.username} 👋")
-        if st.button("Cerrar Sesión", use_container_width=True):
+        if st.button("Cerrar Sesión", width="stretch"):
             st.session_state.token = None
             st.session_state.username = None
             st.rerun()
@@ -149,13 +151,13 @@ with st.sidebar:
             with st.form("login_form"):
                 login_user = st.text_input("Usuario", key="login_user")
                 login_pass = st.text_input("Contraseña", type="password", key="login_pass")
-                if st.form_submit_button("Entrar", use_container_width=True):
+                if st.form_submit_button("Entrar", width="stretch"):
                     _auth("login", login_user, login_pass)
         with register_tab:
             with st.form("register_form"):
                 reg_user = st.text_input("Usuario", key="reg_user", help="Mínimo 3 caracteres")
                 reg_pass = st.text_input("Contraseña", type="password", key="reg_pass", help="Mínimo 6 caracteres")
-                if st.form_submit_button("Crear cuenta", use_container_width=True):
+                if st.form_submit_button("Crear cuenta", width="stretch"):
                     _auth("register", reg_user, reg_pass)
 
     st.divider()
@@ -221,6 +223,15 @@ with st.sidebar:
         help="0 = sin viento, >0 = considera viento actual",
     )
 
+    bus_weight = st.slider(
+        "Ómnibus",
+        min_value=0.0,
+        max_value=10.0,
+        value=1.0,
+        step=0.5,
+        help="0 = ignora ómnibus; 1 = +15% (1-2 buses) / +30% (3+) por tramo; 2 = el doble, etc.",
+    )
+
     allow_parks = st.checkbox(
         "Atravesar parques y plazas",
         value=True,
@@ -236,7 +247,7 @@ with st.sidebar:
     )
 
     # Clear route if weights change (to avoid showing old metrics with new weights)
-    current_route_key = f"route_{st.session_state.origin_coords}_{st.session_state.dest_coords}_{elevation_weight}_{wind_weight}_{allow_parks}_{max_against_traffic_blocks}"
+    current_route_key = f"route_{st.session_state.origin_coords}_{st.session_state.dest_coords}_{elevation_weight}_{wind_weight}_{allow_parks}_{max_against_traffic_blocks}_{bus_weight}_live_bus_v1"
     if st.session_state.last_route_key and st.session_state.last_route_key != current_route_key:
         st.session_state.calculated_route = None
     st.session_state.last_route_key = current_route_key
@@ -247,11 +258,11 @@ with st.sidebar:
     has_coords = st.session_state.origin_coords and st.session_state.dest_coords
     if not has_coords:
         st.warning("⚠️ Carga origen y destino para calcular")
-        st.button("🗺️ Calcular Ruta", use_container_width=True, type="primary", disabled=True)
+        st.button("🗺️ Calcular Ruta", width="stretch", type="primary", disabled=True)
         calculate_button = False
     else:
         calculate_button = st.button(
-            "🗺️ Calcular Ruta", use_container_width=True, type="primary"
+            "🗺️ Calcular Ruta", width="stretch", type="primary"
         )
 
 # Handle button click: calculate route and store in session state
@@ -272,6 +283,10 @@ if calculate_button:
                 if wind_weight > 0:
                     wind_data = fetch_wind_data()
 
+                bus_traffic = try_fetch_bus_traffic(graph) if bus_weight > 0 else None
+                bus_counts = bus_traffic.edge_counts if bus_traffic else None
+                bus_fetched_at = bus_traffic.fetched_at if bus_traffic else None
+
                 path = find_route(
                     graph,
                     origin_node,
@@ -281,6 +296,8 @@ if calculate_button:
                     wind_weight=wind_weight,
                     allow_parks=allow_parks,
                     max_against_traffic_blocks=max_against_traffic_blocks,
+                    bus_counts=bus_counts,
+                    bus_weight=bus_weight,
                 )
 
                 if path:
@@ -292,6 +309,20 @@ if calculate_button:
                         wind_weight=wind_weight,
                         allow_parks=allow_parks,
                         max_against_traffic_blocks=max_against_traffic_blocks,
+                        bus_counts=bus_counts,
+                    )
+                    log_route_query(
+                        graph, path, metrics,
+                        source="streamlit",
+                        origin=(origin_lat, origin_lon),
+                        dest=(dest_lat, dest_lon),
+                        origin_place=origin_place.strip(),
+                        dest_place=dest_place.strip(),
+                        wind_weight=wind_weight,
+                        bus_weight=bus_weight,
+                        allow_parks=allow_parks,
+                        max_against_traffic_blocks=max_against_traffic_blocks,
+                        bus_traffic=bus_traffic,
                     )
 
                     # Store route data in session state for persistence across re-runs
@@ -307,14 +338,23 @@ if calculate_button:
                         "dest_place": dest_place.strip() or f"{dest_lat:.4f}, {dest_lon:.4f}",
                         "elevation_weight": elevation_weight,
                         "wind_weight": wind_weight,
+                        "bus_weight": bus_weight,
                         "allow_parks": allow_parks,
                         "max_against_traffic_blocks": max_against_traffic_blocks,
-                        "map_key": f"map_{origin_lat:.4f}_{origin_lon:.4f}_{dest_lat:.4f}_{dest_lon:.4f}_{elevation_weight}_{wind_weight}_{allow_parks}_{max_against_traffic_blocks}",
+                        "bus_data_fetched_at": bus_fetched_at,
+                        "map_key": f"map_{origin_lat:.4f}_{origin_lon:.4f}_{dest_lat:.4f}_{dest_lon:.4f}_{elevation_weight}_{wind_weight}_{allow_parks}_{max_against_traffic_blocks}_{bus_fetched_at.timestamp() if bus_fetched_at else 'nobus'}",
                     }
 
                     _stop_mock_telemetry()
                     st.session_state.saved_journey_id = None
                     st.success("✅ Ruta calculada exitosamente")
+                    if metrics.live_buses_near_route is not None:
+                        st.caption(
+                            f"Tránsito considerado: {metrics.live_buses_near_route} "
+                            "ómnibus recientes ubicados cerca de los tramos de esta ruta."
+                        )
+                    elif bus_weight > 0:
+                        st.warning("⚠️ Sin datos de ómnibus en vivo: la ruta se calculó sin penalización por buses.")
                 else:
                     st.error("❌ No se encontró ruta entre los puntos")
 
@@ -380,7 +420,7 @@ if st.session_state.calculated_route:
     # 2. Route Metrics
     st.subheader("📊 Métricas de Ruta")
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric(
             "📏 Distancia",
@@ -406,6 +446,16 @@ if st.session_state.calculated_route:
                 st.metric("💨 Viento", "N/A")
         else:
             st.metric("💨 Viento", "—" if route_data["wind_weight"] == 0 else "N/A")
+    with col4:
+        bus_count = (
+            metrics.live_buses_near_route
+            if metrics.live_buses_near_route is not None
+            else "N/D"
+        )
+        st.metric("🚌 Ómnibus en la ruta", bus_count)
+    if route_data["bus_data_fetched_at"] is not None:
+        bus_data_time = route_data["bus_data_fetched_at"].astimezone().strftime("%H:%M:%S")
+        st.caption(f"Última consulta de ómnibus a la IM: {bus_data_time} (hora local).")
 
     # Save route (requires login)
     logged_in = bool(st.session_state.token)
@@ -421,6 +471,7 @@ if st.session_state.calculated_route:
             "elevation_gain_m": metrics.total_elevation_gain_m,
             "elevation_weight": route_data["elevation_weight"],
             "wind_weight": route_data["wind_weight"],
+            "bus_weight": route_data["bus_weight"],
             "allow_parks": route_data["allow_parks"],
             "max_against_traffic_blocks": route_data["max_against_traffic_blocks"],
         }
@@ -526,7 +577,7 @@ if st.session_state.calculated_route:
         template="plotly_white",
         height=400,
     )
-    st.plotly_chart(fig, use_container_width=True, key=f"elevation_profile_{map_key}")
+    st.plotly_chart(fig, width="stretch", key=f"elevation_profile_{map_key}")
 
     # Export map
     map_path = "output/ruta_streamlit.html"

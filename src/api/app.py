@@ -4,12 +4,14 @@ from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from src.api.buses import try_fetch_bus_traffic
 from src.api.schemas import Coordinate, RouteResponse, WindMetrics
 from src.api.users import router as users_router
 from src.api.weather import fetch_wind_data
 from src.db.database import init_db
 from src.graph.loader import load_montevideo_graph
 from src.routing.pathfinder import find_route, nearest_node, compute_route_metrics
+from src.routing.query_log import log_route_query
 from src.utils.geocoding import geocode_place
 from src.visualization.map_export import export_route_map
 
@@ -31,7 +33,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="enbici API",
-    description="Bike routing engine for Montevideo with elevation-aware cost function",
+    description="Bike routing engine for Montevideo with elevation, wind, and live bus costs",
     version="2.0",
     lifespan=lifespan,
 )
@@ -78,6 +80,12 @@ async def get_route(
         ge=0,
         le=3,
         description="Max blocks (segments) to allow cycling against one-way traffic (0-3, 0=disabled)",
+    ),
+    bus_weight: float = Query(
+        default=1.0,
+        ge=0,
+        le=10,
+        description="Live bus penalty factor (0=ignore buses, 1=default 1.15x/1.30x per edge, 2=1.30x/1.60x, ...)",
     ),
 ) -> RouteResponse:
     """
@@ -136,6 +144,9 @@ async def get_route(
                 status_code=400, detail="Origin and destination are the same node"
             )
 
+        bus_traffic = try_fetch_bus_traffic(G) if bus_weight > 0 else None
+        bus_counts = bus_traffic.edge_counts if bus_traffic else None
+
         # Find optimal route
         path = find_route(
             G,
@@ -146,6 +157,8 @@ async def get_route(
             wind_weight=wind_weight,
             allow_parks=allow_parks,
             max_against_traffic_blocks=max_against_traffic_blocks,
+            bus_counts=bus_counts,
+            bus_weight=bus_weight,
         )
 
         if not path:
@@ -160,6 +173,20 @@ async def get_route(
             wind_weight=wind_weight,
             allow_parks=allow_parks,
             max_against_traffic_blocks=max_against_traffic_blocks,
+            bus_counts=bus_counts,
+        )
+        log_route_query(
+            G, path, metrics,
+            source="api",
+            origin=(origin_lat, origin_lon),
+            dest=(dest_lat, dest_lon),
+            origin_place=origin_place,
+            dest_place=dest_place,
+            wind_weight=wind_weight,
+            bus_weight=bus_weight,
+            allow_parks=allow_parks,
+            max_against_traffic_blocks=max_against_traffic_blocks,
+            bus_traffic=bus_traffic,
         )
 
         # Export map
@@ -188,6 +215,7 @@ async def get_route(
             distance_km=metrics.total_distance_m / 1000.0,
             elevation_gain_m=metrics.total_elevation_gain_m,
             node_count=metrics.node_count,
+            live_buses_near_route=metrics.live_buses_near_route,
             wind_metrics=wind_metrics,
             map_url="/static/ruta_montevideo.html",
             route_coordinates=[
