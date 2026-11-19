@@ -1,9 +1,7 @@
-from pathlib import Path
-
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
-DB_PATH = Path(__file__).resolve().parents[2] / "data" / "enbici.db"
+from src.config import DB_PATH
 
 engine = create_engine(
     f"sqlite:///{DB_PATH}",

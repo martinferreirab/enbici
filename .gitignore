@@ -13,3 +13,7 @@ wheels/
 data/enbici.db
 data/.jwt_secret
 .env
+
+# Generated at runtime (route logs, exported trips/telemetry contain user data)
+data/*.csv
+output/ruta_api_*.html

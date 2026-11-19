@@ -6,9 +6,9 @@ import csv
 import logging
 import threading
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import TYPE_CHECKING
 
+from src.config import QUERY_LOG_PATH
 from src.routing.cost import bus_traffic_multiplier
 
 if TYPE_CHECKING:
@@ -18,8 +18,6 @@ if TYPE_CHECKING:
     from src.routing.pathfinder import RouteMetrics
 
 logger = logging.getLogger(__name__)
-
-QUERY_LOG_PATH = Path(__file__).resolve().parents[2] / "data" / "consultas_rutas.csv"
 
 FIELDS = [
     "timestamp", "source",

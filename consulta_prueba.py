@@ -1,10 +1,11 @@
 import sqlite3
 import pandas as pd
 
+from src.config import DB_PATH, STATE_DIR
 from src.routing.cost import bus_traffic_multiplier
 
 # Conectar a la base de datos de SQLite
-conn = sqlite3.connect("data/enbici.db")
+conn = sqlite3.connect(DB_PATH)
 
 # Columnas explícitas: evita exportar password_hash y la columna id duplicada del JOIN
 query = """
@@ -44,6 +45,6 @@ print("\n--- TELEMETRÍA (UBICACIÓN DEL USUARIO EN EL TIEMPO) ---")
 print(df_telemetry)
 
 # Guardar los datos en archivos CSV en el directorio local
-df.to_csv("data/historial_viajes.csv", index=False)
-df_telemetry.to_csv("data/telemetria_viajes.csv", index=False)
-print("\n Archivos CSV guardados en: data/historial_viajes.csv y data/telemetria_viajes.csv")
+df.to_csv(STATE_DIR / "historial_viajes.csv", index=False)
+df_telemetry.to_csv(STATE_DIR / "telemetria_viajes.csv", index=False)
+print(f"\n Archivos CSV guardados en: {STATE_DIR}/historial_viajes.csv y {STATE_DIR}/telemetria_viajes.csv")

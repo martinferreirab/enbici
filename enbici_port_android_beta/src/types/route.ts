@@ -13,14 +13,18 @@ export interface RouteResponse {
   distance_km: number;
   elevation_gain_m: number;
   node_count: number;
-  map_url: string;
+  map_url: string | null;
   route_coordinates: Coordinate[];
   wind_metrics: WindMetrics | null;
+  /** Fresh buses matched to the route's edges; null when bus_weight=0 or live bus data was unavailable. */
+  live_buses_near_route: number | null;
 }
 
 export interface RouteFilters {
   elevation_weight: number;
   wind_weight: number;
+  /** 0 = ignore buses; 1 = +15% (1-2 buses) / +30% (3+) per segment; 2 = double, etc. */
+  bus_weight: number;
   allow_parks: boolean;
   max_against_traffic_blocks: 0 | 1 | 2 | 3;
 }
@@ -33,6 +37,7 @@ export interface RouteRequestParams extends RouteFilters {
 export const DEFAULT_FILTERS: RouteFilters = {
   elevation_weight: 5,
   wind_weight: 0,
+  bus_weight: 1,
   allow_parks: true,
   max_against_traffic_blocks: 0,
 };

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import threading
 import time
 from collections import Counter
@@ -11,22 +10,19 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import lru_cache
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import networkx as nx
 import osmnx as ox
 import requests
-from dotenv import load_dotenv
 from pyproj import Transformer
+
+from src.config import imm_credentials
 
 if TYPE_CHECKING:
     from networkx import DiGraph
 
 logger = logging.getLogger(__name__)
-
-# Credenciales MONTEVIDEO_CLIENT_ID / MONTEVIDEO_CLIENT_SECRET desde <repo>/.env (no pisa variables ya exportadas).
-load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 TOKEN_URL = (
     "https://mvdapi-auth.montevideo.gub.uy"
@@ -75,14 +71,13 @@ _traffic_cache_expires_at = 0.0
 
 
 def _client_credentials() -> tuple[str, str]:
-    client_id = os.getenv("MONTEVIDEO_CLIENT_ID")
-    client_secret = os.getenv("MONTEVIDEO_CLIENT_SECRET")
-    if not client_id or not client_secret:
+    creds = imm_credentials()
+    if creds is None:
         raise BusApiError(
             "Faltan MONTEVIDEO_CLIENT_ID y MONTEVIDEO_CLIENT_SECRET; "
             "configuralos como variables de entorno para usar el tránsito en vivo."
         )
-    return client_id, client_secret
+    return creds
 
 
 def _get_access_token() -> str:

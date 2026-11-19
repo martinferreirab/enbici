@@ -59,6 +59,9 @@ export function BottomSheet({ route, saving, tracking, onSave, onStart, onStop }
             Viento: {w.wind_speed_ms.toFixed(1)} m/s ({(w.wind_speed_ms * 3.6).toFixed(1)} km/h) del {cardinal(w.wind_direction_deg)}
           </Text>
         )}
+        {route.live_buses_near_route !== null && (
+          <Text style={styles.wind}>Ómnibus en la ruta ahora: {route.live_buses_near_route}</Text>
+        )}
         <Pressable style={[styles.cta, tracking && styles.ctaStop]} onPress={tracking ? onStop : onStart}>
           <Text style={styles.ctaText}>{tracking ? "Detener Ruta" : "Iniciar Ruta"}</Text>
         </Pressable>

@@ -1,3 +1,4 @@
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Query, HTTPException
@@ -8,6 +9,7 @@ from src.api.buses import try_fetch_bus_traffic
 from src.api.schemas import Coordinate, RouteResponse, WindMetrics
 from src.api.users import router as users_router
 from src.api.weather import fetch_wind_data
+from src.config import CORS_ORIGINS, IS_PRODUCTION
 from src.db.database import init_db
 from src.graph.loader import load_montevideo_graph
 from src.routing.pathfinder import find_route, nearest_node, compute_route_metrics
@@ -36,11 +38,15 @@ app = FastAPI(
     description="Bike routing engine for Montevideo with elevation, wind, and live bus costs",
     version="2.0",
     lifespan=lifespan,
+    # Swagger/OpenAPI solo fuera de producción.
+    docs_url=None if IS_PRODUCTION else "/docs",
+    redoc_url=None if IS_PRODUCTION else "/redoc",
+    openapi_url=None if IS_PRODUCTION else "/openapi.json",
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -51,8 +57,10 @@ app.include_router(users_router)
 app.mount("/static", StaticFiles(directory="output"), name="static")
 
 
+# `def` (no `async def`): geocoding, APIs externas y Dijkstra bloquean; FastAPI corre los
+# endpoints sync en un threadpool, así una ruta lenta no congela /health, /login, etc.
 @app.get("/route", response_model=RouteResponse, tags=["routing"])
-async def get_route(
+def get_route(
     origin_place: str | None = Query(default=None, description="Origin place name (e.g., 'Plaza Independencia')"),
     origin_lat: float | None = Query(default=None, description="Origin latitude (use origin_place instead if available)"),
     origin_lon: float | None = Query(default=None, description="Origin longitude (use origin_place instead if available)"),
@@ -86,6 +94,10 @@ async def get_route(
         ge=0,
         le=10,
         description="Live bus penalty factor (0=ignore buses, 1=default 1.15x/1.30x per edge, 2=1.30x/1.60x, ...)",
+    ),
+    include_map: bool = Query(
+        default=False,
+        description="Also render a Folium HTML map and return its map_url (debug; the mobile app uses route_coordinates)",
     ),
 ) -> RouteResponse:
     """
@@ -189,16 +201,19 @@ async def get_route(
             bus_traffic=bus_traffic,
         )
 
-        # Export map
-        map_path = "output/ruta_montevideo.html"
-        export_route_map(
-            G,
-            path,
-            (origin_lat, origin_lon),
-            (dest_lat, dest_lon),
-            metrics,
-            map_path,
-        )
+        # Mapa Folium opcional; nombre único para que dos requests simultáneos no se pisen.
+        map_url = None
+        if include_map:
+            map_name = f"ruta_api_{uuid.uuid4().hex[:12]}.html"
+            export_route_map(
+                G,
+                path,
+                (origin_lat, origin_lon),
+                (dest_lat, dest_lon),
+                metrics,
+                f"output/{map_name}",
+            )
+            map_url = f"/static/{map_name}"
 
         # Build wind metrics
         wind_metrics = None
@@ -217,7 +232,7 @@ async def get_route(
             node_count=metrics.node_count,
             live_buses_near_route=metrics.live_buses_near_route,
             wind_metrics=wind_metrics,
-            map_url="/static/ruta_montevideo.html",
+            map_url=map_url,
             route_coordinates=[
                 Coordinate(lat=G.nodes[n]["y"], lon=G.nodes[n]["x"]) for n in path
             ],

@@ -28,6 +28,11 @@ export function FilterModal({ visible, filters, onApply, onClose }: Props) {
           <Slider minimumValue={0} maximumValue={10} step={0.5} value={f.wind_weight}
             onValueChange={(v) => setF({ ...f, wind_weight: v })} />
 
+          <Text style={styles.label}>Evitar ómnibus (tránsito en vivo): {f.bus_weight.toFixed(1)}</Text>
+          <Slider minimumValue={0} maximumValue={10} step={0.5} value={f.bus_weight}
+            onValueChange={(v) => setF({ ...f, bus_weight: v })} />
+          <Text style={styles.hint}>0 = ignorar · 1 = +15% por cuadra con 1-2 ómnibus, +30% con 3 o más</Text>
+
           <View style={styles.row}>
             <Text style={styles.label}>Permitir parques/plazas</Text>
             <Switch value={f.allow_parks} onValueChange={(v) => setF({ ...f, allow_parks: v })} />
@@ -57,6 +62,7 @@ const styles = StyleSheet.create({
   sheet: { backgroundColor: "#fff", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, gap: 6 },
   h: { fontSize: 18, fontWeight: "700", marginBottom: 8 },
   label: { fontSize: 14, marginTop: 8 },
+  hint: { fontSize: 12, color: "#666" },
   row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 8 },
   seg: { flexDirection: "row", gap: 8, marginTop: 6 },
   segItem: { flex: 1, alignItems: "center", paddingVertical: 8, borderRadius: 8, backgroundColor: "#f1f3f4" },

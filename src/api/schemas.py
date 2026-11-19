@@ -26,7 +26,7 @@ class RouteResponse(BaseModel):
     live_buses_near_route: int | None = Field(
         None, description="Fresh buses matched to edges on the recommended route (null if live bus data was unavailable)"
     )
-    map_url: str = Field(..., description="URL to the generated map HTML file")
+    map_url: str | None = Field(None, description="URL to the generated map HTML file (only with include_map=true)")
     route_coordinates: list[Coordinate] = Field(
         default_factory=list, description="Route polyline nodes as [{lat, lon}, ...] for native maps"
     )

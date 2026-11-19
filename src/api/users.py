@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from src.api.rate_limit import auth_rate_limit
 from src.auth.security import (
     create_access_token,
     get_current_user,
@@ -56,7 +57,7 @@ class TelemetryIn(BaseModel):
     speed_ms: float | None = Field(default=None, ge=0)
 
 
-@router.post("/register", response_model=TokenResponse, status_code=201)
+@router.post("/register", response_model=TokenResponse, status_code=201, dependencies=[Depends(auth_rate_limit)])
 def register(body: Credentials, db: Session = Depends(get_db)) -> TokenResponse:
     username = body.username.strip().lower()
     user = User(username=username, password_hash=hash_password(body.password))
@@ -69,7 +70,7 @@ def register(body: Credentials, db: Session = Depends(get_db)) -> TokenResponse:
     return TokenResponse(access_token=create_access_token(user.id), username=username)
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login", response_model=TokenResponse, dependencies=[Depends(auth_rate_limit)])
 def login(body: Credentials, db: Session = Depends(get_db)) -> TokenResponse:
     username = body.username.strip().lower()
     user = db.scalar(select(User).where(User.username == username))

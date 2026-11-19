@@ -1,7 +1,4 @@
-import os
-import secrets
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import jwt
 from fastapi import Depends, HTTPException
@@ -9,7 +6,8 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
-from src.db.database import DB_PATH, get_db
+from src.config import jwt_secret
+from src.db.database import get_db
 from src.db.models import User
 
 ALGORITHM = "HS256"
@@ -19,19 +17,7 @@ _pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
 _bearer = HTTPBearer(auto_error=False)
 
 
-def _load_secret() -> str:
-    """ENBICI_JWT_SECRET env var, else a random secret persisted next to the DB."""
-    if env := os.environ.get("ENBICI_JWT_SECRET"):
-        return env
-    path: Path = DB_PATH.parent / ".jwt_secret"
-    if not path.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(secrets.token_hex(32))
-        path.chmod(0o600)
-    return path.read_text().strip()
-
-
-SECRET_KEY = _load_secret()
+SECRET_KEY = jwt_secret()
 
 
 def hash_password(password: str) -> str:
